@@ -1,27 +1,55 @@
-version: "3.8"
-
 services:
-
   gateway:
-    build: ../gateway
+    build:
+      context: ../gateway
     ports:
       - "80:80"
     depends_on:
       - user-service
       - product-service
       - order-service
+      - payment-service
+      - notification-service
+      - inventory-service
+    networks:
+      - secureshop-network
 
   user-service:
-    build: ../services/user-service
-    ports:
-      - "8001:8000"
+    build:
+      context: ../services/user-service
+    networks:
+      - secureshop-network
 
   product-service:
-    build: ../services/product-service
-    ports:
-      - "8002:8000"
+    build:
+      context: ../services/product-service
+    networks:
+      - secureshop-network
 
   order-service:
-    build: ../services/order-service
-    ports:
-      - "8003:8000"
+    build:
+      context: ../services/order-service
+    networks:
+      - secureshop-network
+
+  payment-service:
+    build:
+      context: ../services/payment-service
+    networks:
+      - secureshop-network
+
+  notification-service:
+    build:
+      context: ../services/notification-service
+    networks:
+      - secureshop-network
+
+  inventory-service:
+    build:
+      context: ../services/inventory-service
+    networks:
+      - secureshop-network
+
+networks:
+  secureshop-network:
+    driver: bridge

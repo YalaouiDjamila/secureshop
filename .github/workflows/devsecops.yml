@@ -1,0 +1,86 @@
+name: DevSecOps Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  # ========== SAST ==========
+  sast-bandit:
+    name: SAST - Bandit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install bandit
+      - run: bandit -r ./services -f sarif -o bandit-results.sarif || true
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: bandit-results.sarif
+          category: bandit
+
+  # ========== SCA ==========
+  sca-dependency-check:
+    name: SCA - Dependency Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: OWASP Dependency Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'SecureShop'
+          path: '.'
+          format: 'SARIF'
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/dependency-check-report.sarif
+          category: dependency-check
+
+  # ========== SECRET SCANNING ==========
+  secrets-gitleaks:
+    name: Secret Scanning - Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ========== CONTAINER SCANNING ==========
+  container-trivy:
+    name: Container Scan - Trivy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose -f infrastructure/docker-compose.yml build
+      - uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'image'
+          image-ref: 'infrastructure-user-service:latest'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy
+
+  # ========== DAST ==========
+  dast-zap:
+    name: DAST - OWASP ZAP
+    runs-on: ubuntu-latest
+    needs: [container-trivy]
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose -f infrastructure/docker-compose.yml up -d
+      - run: sleep 30
+      - uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: 'http://localhost'
+      - run: docker compose -f infrastructure/docker-compose.yml down
