@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+import subprocess   # ADD
 
 app = FastAPI(title="Inventory Service")
 
@@ -22,11 +23,18 @@ def get_product_inventory(product_id: int):
         return inventory[product_id]
     raise HTTPException(status_code=404, detail="Product not found")
 
+# ADD THIS — Bandit flags shell=True (command injection)
+@app.get("/inventory/check")
+def check_item(item: str):
+    result = subprocess.run(
+        f"echo stock check: {item}", shell=True, capture_output=True
+    )
+    return {"output": result.stdout.decode()}
+
 @app.post("/inventory/reserve")
 def reserve_stock(update: StockUpdate):
     if update.product_id not in inventory:
         raise HTTPException(status_code=404, detail="Product not found")
-    
     if inventory[update.product_id]["stock"] - inventory[update.product_id]["reserved"] >= update.quantity:
         inventory[update.product_id]["reserved"] += update.quantity
         return {"message": "Stock reserved", "inventory": inventory[update.product_id]}
@@ -36,8 +44,9 @@ def reserve_stock(update: StockUpdate):
 def release_stock(update: StockUpdate):
     if update.product_id not in inventory:
         raise HTTPException(status_code=404, detail="Product not found")
-    
-    inventory[update.product_id]["reserved"] = max(0, inventory[update.product_id]["reserved"] - update.quantity)
+    inventory[update.product_id]["reserved"] = max(
+        0, inventory[update.product_id]["reserved"] - update.quantity
+    )
     return {"message": "Stock released", "inventory": inventory[update.product_id]}
 
 @app.get("/")

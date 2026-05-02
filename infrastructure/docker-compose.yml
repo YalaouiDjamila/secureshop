@@ -17,36 +17,68 @@ services:
   user-service:
     build:
       context: ../services/user-service
+    environment:
+      - JWT_SECRET=supersecretkey123        # Checkov: hardcoded secret
+      - DB_PASSWORD=admin123                # Checkov: hardcoded secret
+    ports:
+      - "8001:8000"
     networks:
       - secureshop-network
 
   product-service:
     build:
       context: ../services/product-service
+    ports:
+      - "8002:8000"
     networks:
       - secureshop-network
 
   order-service:
     build:
       context: ../services/order-service
+    ports:
+      - "8003:8000"
     networks:
       - secureshop-network
 
   payment-service:
     build:
       context: ../services/payment-service
+    environment:
+      - STRIPE_KEY=sk_live_4eC39HqLyjWDarjtT1zdp7dc    # Checkov: hardcoded secret
+      - PAYMENT_DB_PASSWORD=P@ssw0rd2024!               # Checkov: hardcoded secret
+    ports:
+      - "8004:8000"
     networks:
       - secureshop-network
 
   notification-service:
     build:
       context: ../services/notification-service
+    environment:
+      - SMTP_PASSWORD=EmailP@ss123          # Checkov: hardcoded secret
+      - SMTP_USER=noreply@secureshop.com
+    ports:
+      - "8005:8000"
     networks:
       - secureshop-network
 
   inventory-service:
     build:
       context: ../services/inventory-service
+    ports:
+      - "8006:8000"
+    networks:
+      - secureshop-network
+
+  db:
+    image: postgres:13                      # Checkov: unpinned/old image
+    environment:
+      POSTGRES_PASSWORD: admin123           # Checkov: hardcoded password
+      POSTGRES_USER: admin
+      POSTGRES_DB: secureshop
+    ports:
+      - "5432:5432"                         # Checkov: DB port exposed to host
     networks:
       - secureshop-network
 

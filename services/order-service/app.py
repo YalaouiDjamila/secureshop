@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
 import uuid
+import xml.etree.ElementTree as ET   # ADD
 
 app = FastAPI(title="Order Service")
 
@@ -27,6 +28,13 @@ def create_order(order: Order):
     }
     orders.append(new_order)
     return {"message": "Order created", "order": new_order}
+
+# ADD THIS — Bandit flags ET.fromstring with user input (XXE vulnerability)
+@app.post("/orders/import")
+def import_order(data: dict):
+    xml_data = data.get("xml", "<order/>")
+    tree = ET.fromstring(xml_data)   # Bandit: possible XML injection
+    return {"parsed": tree.tag}
 
 @app.get("/orders")
 def get_orders():

@@ -2,8 +2,15 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
 import uuid
+import hashlib          # ADD
+import subprocess       # ADD
 
 app = FastAPI(title="User Service")
+
+# ADD THESE — Bandit + Gitleaks will catch them
+JWT_SECRET = "supersecretkey123"
+DB_PASSWORD = "admin123"
+AWS_SECRET_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 
 # In-memory storage (use database in production)
 users_db = []
@@ -22,10 +29,13 @@ class UserResponse(BaseModel):
     username: str
     email: str = None
 
+# ADD THIS — Bandit flags MD5 as weak crypto
+def hash_password(password: str):
+    return hashlib.md5(password.encode()).hexdigest()
+
 # Registration endpoint
 @app.post("/register")
 def register(user: UserRegister):
-    # Check if user exists
     for u in users_db:
         if u["username"] == user.username:
             raise HTTPException(status_code=400, detail="Username already exists")
@@ -33,7 +43,7 @@ def register(user: UserRegister):
     new_user = {
         "id": str(uuid.uuid4()),
         "username": user.username,
-        "password": user.password,  # NOTE: Hash passwords in production!
+        "password": hash_password(user.password),  # CHANGE THIS LINE (uses weak MD5)
         "email": user.email
     }
     users_db.append(new_user)
@@ -43,7 +53,7 @@ def register(user: UserRegister):
 @app.post("/login")
 def login(user: UserLogin):
     for u in users_db:
-        if u["username"] == user.username and u["password"] == user.password:
+        if u["username"] == user.username and u["password"] == hash_password(user.password):
             return {
                 "message": "Login successful",
                 "user_id": u["id"],
@@ -51,7 +61,15 @@ def login(user: UserLogin):
             }
     raise HTTPException(status_code=401, detail="Invalid credentials")
 
-# GET all users (THIS WAS MISSING!)
+# ADD THIS — Bandit flags shell=True (command injection)
+@app.get("/users/debug")
+def debug_user(username: str):
+    result = subprocess.run(
+        f"echo user: {username}", shell=True, capture_output=True
+    )
+    return {"output": result.stdout.decode()}
+
+# GET all users
 @app.get("/users")
 def get_users():
     return [
@@ -59,7 +77,7 @@ def get_users():
         for u in users_db
     ]
 
-# GET single user (ALSO MISSING!)
+# GET single user
 @app.get("/users/{user_id}")
 def get_user(user_id: str):
     for u in users_db:
