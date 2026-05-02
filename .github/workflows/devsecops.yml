@@ -164,12 +164,10 @@ jobs:
 
       - name: Install Syft
         run: |
-          wget https://github.com/anchore/syft/releases/latest/download/syft_Linux_x86_64.tar.gz
-          tar -xzf syft_Linux_x86_64.tar.gz
-          sudo mv syft /usr/local/bin/
+           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
 
-      - name: Generate SBOM
-        run: syft dir:. -o json > sbom.json
+      - name: Check Syft version
+        run: yft version
 
       - name: Upload SBOM
         uses: actions/upload-artifact@v4
