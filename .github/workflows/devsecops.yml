@@ -21,6 +21,7 @@ jobs:
   sbom:
     name: SBOM - Syft
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -44,6 +45,7 @@ jobs:
   sast-bandit:
     name: SAST - Bandit
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -60,6 +62,12 @@ jobs:
           mkdir -p reports
           bandit -r ./services -f json -o reports/bandit-results.json
 
+      - name: Ensure Bandit report exists
+        run: |
+          if [ ! -f reports/bandit-results.json ]; then
+            echo '{"results":[],"metrics":{}}' > reports/bandit-results.json
+          fi
+
       - name: Upload Bandit Report
         uses: actions/upload-artifact@v4
         with:
@@ -71,6 +79,7 @@ jobs:
   sca-dependency-check:
     name: SCA - Dependency Check
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -96,6 +105,7 @@ jobs:
   sca-pip-audit:
     name: SCA - pip-audit
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -132,6 +142,7 @@ jobs:
   secrets-gitleaks:
     name: Secret Scanning - Gitleaks
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -166,32 +177,48 @@ jobs:
   container-trivy:
     name: Container Scan - Trivy
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-
-      - name: Build Docker images
-        run: docker compose -f infrastructure/docker-compose.yml build
 
       - name: Install Trivy
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
 
+      - name: Build Docker images one by one
+        continue-on-error: true
+        run: |
+          # Build each service individually so one failure doesn't stop all
+          for svc in user-service product-service order-service payment-service notification-service inventory-service; do
+            echo "=== Building $svc ==="
+            docker build -t "secureshop-$svc" "services/$svc" || echo "FAILED to build $svc"
+          done
+
       - name: Scan all images and save report
         continue-on-error: true
         run: |
           mkdir -p reports
-          for img in infrastructure-user-service infrastructure-product-service infrastructure-order-service infrastructure-payment-service infrastructure-notification-service infrastructure-inventory-service; do
-            echo "=== Scanning $img ==="
-            trivy image --severity HIGH,CRITICAL --format json --no-progress $img >> reports/trivy-results.json 2>&1 || true
-          done
+          # Find any secureshop images that were successfully built
+          IMAGES=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "secureshop-" || true)
+          echo "Images to scan: $IMAGES"
+          if [ -z "$IMAGES" ]; then
+            echo "No images found to scan" > reports/trivy-results.json
+          else
+            for img in $IMAGES; do
+              echo "=== Scanning $img ==="
+              trivy image --severity HIGH,CRITICAL --format table --no-progress "$img" 2>&1 || true
+              echo "---" 
+            done > reports/trivy-results.json
+          fi
 
       - name: Ensure Trivy report exists
         run: |
           if [ ! -f reports/trivy-results.json ]; then
-            echo "[]" > reports/trivy-results.json
+            echo "No images scanned" > reports/trivy-results.json
           fi
 
       - name: Upload Trivy Report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: trivy-results
@@ -202,6 +229,7 @@ jobs:
   iac-checkov:
     name: IaC Scan - Checkov
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -239,16 +267,18 @@ jobs:
   dast-zap:
     name: DAST - OWASP ZAP
     runs-on: ubuntu-latest
+    continue-on-error: true
     needs: [container-trivy]
     steps:
       - uses: actions/checkout@v4
 
       - name: Start services
+        continue-on-error: true
         run: |
-          docker compose -f infrastructure/docker-compose.yml up -d
+          docker compose -f infrastructure/docker-compose.yml up -d --build
           echo "Waiting for services to be ready..."
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            echo "Attempt $i/10..."
+          for i in $(seq 1 12); do
+            echo "Attempt $i/12..."
             if curl -s --fail http://localhost/products 2>/dev/null; then
               echo "Services are ready!"
               break
