@@ -199,4 +199,4 @@ jobs:
         continue-on-error: true
 
       - name: Stop services
-        run: docker compose -f infrastructure/docker-compose.yml dow
+        run: docker compose -f infrastructure/docker-compose.yml down
