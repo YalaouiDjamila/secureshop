@@ -75,6 +75,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run OWASP Dependency Check
+        continue-on-error: true
         uses: dependency-check/Dependency-Check_Action@main
         with:
           project: 'SecureShop'
@@ -83,7 +84,6 @@ jobs:
           args: >
             --failOnCVSS 7
             --enableRetired
-        continue-on-error: true
 
       - name: Upload Dependency Check Report
         uses: actions/upload-artifact@v4
@@ -110,11 +110,16 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p reports
-          echo "[]" > reports/pip-audit-results.json
           for service in services/*/; do
             echo "=== Scanning $service ==="
             pip-audit -r "$service/requirements.txt" --format json 2>&1 || true
           done > reports/pip-audit-results.json
+
+      - name: Ensure pip-audit report exists
+        run: |
+          if [ ! -f reports/pip-audit-results.json ]; then
+            echo "[]" > reports/pip-audit-results.json
+          fi
 
       - name: Upload pip-audit Report
         uses: actions/upload-artifact@v4
@@ -144,6 +149,12 @@ jobs:
           mkdir -p reports
           gitleaks detect --source . --no-git --report-format json --report-path reports/gitleaks-results.json --verbose || true
 
+      - name: Ensure Gitleaks report exists
+        run: |
+          if [ ! -f reports/gitleaks-results.json ]; then
+            echo "[]" > reports/gitleaks-results.json
+          fi
+
       - name: Upload Gitleaks Report
         uses: actions/upload-artifact@v4
         with:
@@ -169,21 +180,16 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p reports
-          echo "[]" > reports/trivy-results.json
-          RESULTS="["
-          FIRST=true
           for img in infrastructure-user-service infrastructure-product-service infrastructure-order-service infrastructure-payment-service infrastructure-notification-service infrastructure-inventory-service; do
             echo "=== Scanning $img ==="
-            OUTPUT=$(trivy image --severity HIGH,CRITICAL --format json --no-progress $img 2>/dev/null || echo "{}")
-            if [ "$FIRST" = true ]; then
-              FIRST=false
-            else
-              RESULTS="$RESULTS,"
-            fi
-            RESULTS="$RESULTS{\"image\":\"$img\",\"results\":$OUTPUT}"
+            trivy image --severity HIGH,CRITICAL --format json --no-progress $img >> reports/trivy-results.json 2>&1 || true
           done
-          RESULTS="$RESULTS]"
-          echo "$RESULTS" > reports/trivy-results.json
+
+      - name: Ensure Trivy report exists
+        run: |
+          if [ ! -f reports/trivy-results.json ]; then
+            echo "[]" > reports/trivy-results.json
+          fi
 
       - name: Upload Trivy Report
         uses: actions/upload-artifact@v4
@@ -212,6 +218,15 @@ jobs:
         continue-on-error: true
         run: |
           checkov -f infrastructure/docker-compose.yml --framework docker_compose --output json > reports/checkov-compose.json 2>&1 || true
+
+      - name: Ensure Checkov reports exist
+        run: |
+          if [ ! -f reports/checkov-dockerfile.json ]; then
+            echo "{}" > reports/checkov-dockerfile.json
+          fi
+          if [ ! -f reports/checkov-compose.json ]; then
+            echo "{}" > reports/checkov-compose.json
+          fi
 
       - name: Upload Checkov Reports
         uses: actions/upload-artifact@v4
@@ -247,7 +262,13 @@ jobs:
         uses: zaproxy/action-baseline@v0.12.0
         with:
           target: 'http://localhost'
-          artifact_name: zap-results
+
+      - name: Upload ZAP Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-results
+          path: report_html.html
 
       - name: Stop services
         if: always()

@@ -1,1 +1,28 @@
+title = "SecureShop Gitleaks Config"
 
+[extend]
+useDefault = true
+
+[[rules]]
+id = "hardcoded-jwt-secret"
+description = "Hardcoded JWT Secret"
+regex = '''JWT_SECRET\s*=\s*["\'][^"\']+["\']'''
+severity = "ERROR"
+
+[[rules]]
+id = "hardcoded-db-password"
+description = "Hardcoded DB Password"
+regex = '''DB_PASSWORD\s*=\s*["\'][^"\']+["\']'''
+severity = "ERROR"
+
+[[rules]]
+id = "hardcoded-smtp-password"
+description = "Hardcoded SMTP Password"
+regex = '''SMTP_PASSWORD\s*=\s*["\'][^"\']+["\']'''
+severity = "ERROR"
+
+[[rules]]
+id = "hardcoded-stripe-key"
+description = "Hardcoded Stripe Key"
+regex = '''sk_live_[a-zA-Z0-9]+'''
+severity = "ERROR"
