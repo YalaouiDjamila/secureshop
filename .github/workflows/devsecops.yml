@@ -35,7 +35,7 @@ jobs:
           name: sbom
           path: sbom.json
 
-  # ================= SAST =================
+   # ================= SAST =================
   sast-bandit:
     name: SAST - Bandit
     runs-on: ubuntu-latest
@@ -45,17 +45,16 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install Bandit
-        run: pip install bandit
-      - name: Run Bandit (NO || true - real results)
+        run: pip install bandit[sarif]
+      - name: Run Bandit
         run: |
           mkdir -p reports
-          bandit -r ./services -f sarif -o reports/bandit-results.sarif
-      - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@v4
+          bandit -r ./services -f json -o reports/bandit-results.json
+      - name: Upload Bandit Report
+        uses: actions/upload-artifact@v4
         with:
-          sarif_file: reports/bandit-results.sarif
-          category: bandit
-
+          name: bandit-results
+          path: reports/bandit-results.json
   # ================= SCA =================
   sca-dependency-check:
     name: SCA - Dependency Check
