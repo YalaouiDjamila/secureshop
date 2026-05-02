@@ -2,10 +2,16 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
 import uuid
+import os
 
-app = FastAPI(title="User Service")
+app = FastAPI(title="User Service", debug=True)  # ⚠️ VULNÉRABLE: Debug mode
 
-# In-memory storage (use database in production)
+# ⚠️ VULNÉRABLE: Hardcoded secrets
+JWT_SECRET = "super-secret-key-12345"
+API_KEY = "sk-1234567890abcdef"
+ADMIN_PASSWORD = "admin123!"
+
+# In-memory storage
 users_db = []
 
 class UserRegister(BaseModel):
@@ -22,10 +28,8 @@ class UserResponse(BaseModel):
     username: str
     email: str = None
 
-# Registration endpoint
 @app.post("/register")
 def register(user: UserRegister):
-    # Check if user exists
     for u in users_db:
         if u["username"] == user.username:
             raise HTTPException(status_code=400, detail="Username already exists")
@@ -33,13 +37,12 @@ def register(user: UserRegister):
     new_user = {
         "id": str(uuid.uuid4()),
         "username": user.username,
-        "password": user.password,  # NOTE: Hash passwords in production!
+        "password": user.password,  # ⚠️ VULNÉRABLE: Plain text password
         "email": user.email
     }
     users_db.append(new_user)
     return {"message": "User registered successfully", "user_id": new_user["id"]}
 
-# Login endpoint
 @app.post("/login")
 def login(user: UserLogin):
     for u in users_db:
@@ -51,7 +54,6 @@ def login(user: UserLogin):
             }
     raise HTTPException(status_code=401, detail="Invalid credentials")
 
-# GET all users (THIS WAS MISSING!)
 @app.get("/users")
 def get_users():
     return [
@@ -59,7 +61,6 @@ def get_users():
         for u in users_db
     ]
 
-# GET single user (ALSO MISSING!)
 @app.get("/users/{user_id}")
 def get_user(user_id: str):
     for u in users_db:
@@ -67,7 +68,21 @@ def get_user(user_id: str):
             return {"id": u["id"], "username": u["username"], "email": u.get("email")}
     raise HTTPException(status_code=404, detail="User not found")
 
-# Health check
+# ⚠️ VULNÉRABLE: SQL Injection pattern (string concatenation)
+@app.get("/users/search")
+def search_users(q: str = ""):
+    results = []
+    for u in users_db:
+        if q.lower() in u["username"].lower():
+            results.append({"id": u["id"], "username": u["username"]})
+    return results
+
+# ⚠️ VULNÉRABLE: Command Injection
+@app.get("/users/export")
+def export_users(format: str = "json"):
+    os.system(f"echo 'Exporting users in {format} format'")  # Command injection!
+    return {"message": f"Exporting in {format}"}
+
 @app.get("/")
 def root():
     return {"message": "User Service is running", "users_count": len(users_db)}
