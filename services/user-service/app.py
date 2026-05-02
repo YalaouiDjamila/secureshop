@@ -4,14 +4,17 @@ from typing import List
 import uuid
 import os
 
-app = FastAPI(title="User Service", debug=True)  # ⚠️ VULNÉRABLE: Debug mode
+# ⚠️ VULNÉRABLE: Debug mode enabled
+app = FastAPI(title="User Service", debug=True)
 
-# ⚠️ VULNÉRABLE: Hardcoded secrets
-JWT_SECRET = "super-secret-key-12345"
-API_KEY = "sk-1234567890abcdef"
-ADMIN_PASSWORD = "admin123!"
+# ⚠️ VULNÉRABLE: Hardcoded secrets (for testing)
+JWT_SECRET = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7EXAMPLE"
+AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+GITHUB_TOKEN = "ghp_1234567890abcdefghijklmnopqrstuv"
+DATABASE_PASSWORD = "P@ssw0rd123!"
+API_KEY = "sk-1234567890abcdefghijklmnopqrstuvwxyz"
 
-# In-memory storage
 users_db = []
 
 class UserRegister(BaseModel):
@@ -37,7 +40,7 @@ def register(user: UserRegister):
     new_user = {
         "id": str(uuid.uuid4()),
         "username": user.username,
-        "password": user.password,  # ⚠️ VULNÉRABLE: Plain text password
+        "password": user.password,  # ⚠️ VULNÉRABLE: Plain text
         "email": user.email
     }
     users_db.append(new_user)
@@ -68,7 +71,13 @@ def get_user(user_id: str):
             return {"id": u["id"], "username": u["username"], "email": u.get("email")}
     raise HTTPException(status_code=404, detail="User not found")
 
-# ⚠️ VULNÉRABLE: SQL Injection pattern (string concatenation)
+# ⚠️ VULNÉRABLE: Command injection
+@app.get("/users/export")
+def export_users(format: str = "json"):
+    os.system(f"echo 'Exporting users in {format} format'")
+    return {"message": f"Exporting in {format}"}
+
+# ⚠️ VULNÉRABLE: SQL injection pattern
 @app.get("/users/search")
 def search_users(q: str = ""):
     results = []
@@ -76,12 +85,6 @@ def search_users(q: str = ""):
         if q.lower() in u["username"].lower():
             results.append({"id": u["id"], "username": u["username"]})
     return results
-
-# ⚠️ VULNÉRABLE: Command Injection
-@app.get("/users/export")
-def export_users(format: str = "json"):
-    os.system(f"echo 'Exporting users in {format} format'")  # Command injection!
-    return {"message": f"Exporting in {format}"}
 
 @app.get("/")
 def root():
