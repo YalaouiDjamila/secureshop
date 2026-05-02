@@ -4,3 +4,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+USER appuser
+HEALTHCHECK CMD curl --fail http://localhost:8000/health || exit 1
