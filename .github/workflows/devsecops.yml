@@ -107,7 +107,7 @@ jobs:
           scan-type: 'image'
           image-ref: 'infrastructure-product-service:latest'
           format: 'table'
-          exit-code: '0'
+          exit-code: '1'
           severity: 'HIGH,CRITICAL'
         continue-on-error: true
 
@@ -133,3 +133,56 @@ jobs:
       
       - name: Stop services
         run: docker compose -f infrastructure/docker-compose.yml down
+#sca
+  python-sca:
+    name: SCA - pip-audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Install dependencies
+        run: |
+          find . -name "requirements.txt" -exec pip install -r {} \; || true
+
+      - name: Run pip-audit
+        run: pip-audit || true
+  iac-checkov:
+    name: IaC Scan - Checkov
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          framework: all
+        continue-on-error: true
+  sbom:
+    name: SBOM - Syft
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh
+
+      - name: Generate SBOM
+        run: syft dir:. -o json > sbom.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json
