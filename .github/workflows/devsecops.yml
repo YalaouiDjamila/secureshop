@@ -91,6 +91,8 @@ jobs:
         run: find . -name "requirements.txt" -exec pip install -r {} \; 2>/dev/null || true
       - name: Run pip-audit (REAL results)
         run: pip-audit
+      - name: Run pip-audit
+        run: pip-audit --ignore-vuln CVE-2026-3219  
 
   # ================= SECRET SCAN =================
   secrets-gitleaks:
