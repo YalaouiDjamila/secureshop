@@ -35,27 +35,27 @@ jobs:
           name: sbom
           path: sbom.json
 
- # ================= SAST =================
- sast-bandit:
-  name: SAST - Bandit
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-    - name: Install Bandit
-      run: pip install bandit[sarif]
-    - name: Run Bandit
-      continue-on-error: true        # ← MOVE IT HERE, not on the job
-      run: |
-        mkdir -p reports
-        bandit -r ./services -f json -o reports/bandit-results.json
-    - name: Upload Bandit Report
-      uses: actions/upload-artifact@v4
-      with:
-        name: bandit-results
-        path: reports/bandit-results.json
+   # ================= SAST =================
+  sast-bandit:
+    name: SAST - Bandit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install Bandit
+        run: pip install bandit[sarif]
+      - name: Run Bandit
+        continue-on-error: true 
+        run: |
+          mkdir -p reports
+          bandit -r ./services -f json -o reports/bandit-results.json
+      - name: Upload Bandit Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-results
+          path: reports/bandit-results.json
   # ================= SCA =================
   sca-dependency-check:
     name: SCA - Dependency Check
