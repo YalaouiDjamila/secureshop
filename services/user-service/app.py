@@ -8,13 +8,12 @@ import os
 app = FastAPI(title="User Service", debug=True)
 
 # ⚠️ VULNÉRABLE: Hardcoded secrets (for testing)
-JWT_SECRET = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
-AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7EXAMPLE"
-AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-GITHUB_TOKEN = "ghp_1234567890abcdefghijklmnopqrstuv"
-DATABASE_PASSWORD = "P@ssw0rd123!"
-API_KEY = "sk-1234567890abcdefghijklmnopqrstuvwxyz"
 
+# ⚠️ VULNÉRABLE: Hardcoded secrets
+JWT_SECRET = "super-secret-key-for-testing-12345"
+DATABASE_URL = "postgresql://admin:MyP@ssw0rd123!@localhost:5432/mydb"
+AWS_KEY = "AKIAIOSFODNN7EXAMPLE"
+SECRET_KEY = "sk-1234567890abcdefghijklmnopqrstuv"
 users_db = []
 
 class UserRegister(BaseModel):
