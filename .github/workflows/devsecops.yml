@@ -17,67 +17,25 @@ env:
 
 jobs:
 
-   # ================= SECRETS MANAGEMENT - VAULT =================
-  secrets-vault:
-    name: Secrets Management - Vault
+   # ================= SCA - OWASP DEPENDENCY CHECK =================
+  sca-dependency-check:
+    name: SCA - Dependency Check
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       
-      - name: Start Vault Container
-        run: |
-          docker run -d --name vault-dev \
-            --cap-add=IPC_LOCK \
-            -e 'VAULT_DEV_ROOT_TOKEN_ID=secureshop-dev-token' \
-            -e 'VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200' \
-            -p 8200:8200 \
-            hashicorp/vault:1.15
-          sleep 10
+      - name: Run OWASP Dependency Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'SecureShop'
+          path: 'services/java-service'
+          format: 'HTML'
+        continue-on-error: true
       
-      - name: Test Vault
-        run: |
-          mkdir -p reports
-          echo "=== HashiCorp Vault - Secrets Management ===" > reports/vault-results.txt
-          echo "" >> reports/vault-results.txt
-          echo "Status: Vault Dev Mode started successfully" >> reports/vault-results.txt
-          echo "Address: http://127.0.0.1:8200" >> reports/vault-results.txt
-          echo "Auth Method: Token" >> reports/vault-results.txt
-          echo "" >> reports/vault-results.txt
-          
-          # Test Vault health
-          echo "--- Vault Health Check ---" >> reports/vault-results.txt
-          curl -s http://127.0.0.1:8200/v1/sys/health >> reports/vault-results.txt
-          echo "" >> reports/vault-results.txt
-      
-      - name: Store Secrets
-        run: |
-          # Store sample secrets
-          curl -s --header "X-Vault-Token: secureshop-dev-token" \
-            --request POST \
-            --data '{"data":{"JWT_SECRET":"test-key","DB_PASSWORD":"test-pass"}}' \
-            http://127.0.0.1:8200/v1/secret/data/secureshop/user-service
-          
-          echo "" >> reports/vault-results.txt
-          echo "--- Secrets Stored ---" >> reports/vault-results.txt
-          echo "Path: secret/secureshop/user-service" >> reports/vault-results.txt
-          echo "Keys: JWT_SECRET, DB_PASSWORD" >> reports/vault-results.txt
-          echo "Status: Secrets encrypted and stored in Vault" >> reports/vault-results.txt
-      
-      - name: Retrieve Secrets
-        run: |
-          echo "" >> reports/vault-results.txt
-          echo "--- Secrets Retrieved ---" >> reports/vault-results.txt
-          curl -s --header "X-Vault-Token: secureshop-dev-token" \
-            http://127.0.0.1:8200/v1/secret/data/secureshop/user-service >> reports/vault-results.txt
-      
-      - name: Upload Vault Report
+      - name: Upload Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: vault-results
-          path: reports/vault-results.txt
-      
-      - name: Cleanup
-        if: always()
-        run: docker stop vault-dev && docker rm vault-dev
+          name: dependency-check-report
+          path: reports/
