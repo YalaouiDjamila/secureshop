@@ -58,16 +58,27 @@ jobs:
           mkdir -p reports
           if [ -d "./services" ] && find ./services -name "*.py" | grep -q .; then
             bandit -r ./services -f json -o reports/bandit-results.json || true
+            bandit -r ./services -f sarif -o reports/bandit-results.sarif || true
           else
             echo '{"results":[],"metrics":{},"errors":[],"generated_at":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > reports/bandit-results.json
             echo "No Python files found in ./services — skipping Bandit scan."
           fi
 
       - name: Upload Bandit Report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bandit-results
-          path: reports/bandit-results.json
+          path: |
+            reports/bandit-results.json
+            reports/bandit-results.sarif
+
+      - name: Upload Bandit SARIF to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/bandit-results.sarif
+          category: bandit-sast
 
   # ================= SCA =================
   sca-dependency-check:
@@ -203,6 +214,13 @@ jobs:
           name: gitleaks-results
           path: reports/gitleaks-results.sarif
 
+      - name: Upload Gitleaks SARIF to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/gitleaks-results.sarif
+          category: gitleaks-secrets
+
   # ================= SECRETS MANAGEMENT =================
   secrets-vault:
     name: Secrets Management - Vault
@@ -312,12 +330,30 @@ jobs:
 
           cat reports/trivy-container-results.txt
 
+      - name: Generate Trivy SARIF report
+        run: |
+          trivy image \
+            --severity HIGH,CRITICAL \
+            --no-progress \
+            --format sarif \
+            --output reports/trivy-container.sarif \
+            infrastructure-user-service 2>/dev/null || true
+
       - name: Upload Trivy Container Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: trivy-container-results
-          path: reports/trivy-container-results.txt
+          path: |
+            reports/trivy-container-results.txt
+            reports/trivy-container.sarif
+
+      - name: Upload Trivy SARIF to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/trivy-container.sarif
+          category: trivy-container
 
   # ================= IaC =================
   iac-checkov:
@@ -336,6 +372,7 @@ jobs:
           mkdir -p reports
           echo "=== Dockerfile Scan ===" > reports/checkov-results.txt
           checkov --directory . --framework dockerfile --output cli >> reports/checkov-results.txt 2>&1 || true
+          checkov --directory . --framework dockerfile --output sarif 2>/dev/null > reports/checkov-results.sarif || true
 
       - name: Scan docker-compose
         continue-on-error: true
@@ -360,7 +397,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: checkov-results
-          path: reports/checkov-results.txt
+          path: |
+            reports/checkov-results.txt
+            reports/checkov-results.sarif
+
+      - name: Upload Checkov SARIF to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/checkov-results.sarif
+          category: checkov-iac
 
   # ================= DAST =================
   dast-zap:
@@ -416,6 +462,13 @@ jobs:
             reports/zap-report.html
             reports/zap-report.json
             reports/zap-report.md
+
+      - name: Upload ZAP SARIF to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/zap-report.json
+          category: zap-dast
 
       - name: Stop services
         if: always()
