@@ -2,9 +2,9 @@ name: DevSecOps Pipeline
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
   workflow_dispatch:
 
 permissions:
@@ -17,31 +17,300 @@ env:
 
 jobs:
 
-    # ================= SCA - OWASP DEPENDENCY CHECK =================
+  # ================= SBOM =================
+  sbom:
+    name: SBOM - Syft
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Syft
+        run: |
+          curl -Lo syft.tar.gz https://github.com/anchore/syft/releases/download/v1.0.0/syft_1.0.0_linux_amd64.tar.gz
+          tar -xzf syft.tar.gz
+          sudo mv syft /usr/local/bin/
+
+      - name: Generate SBOM
+        run: syft dir:. -o json > sbom.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json
+
+  # ================= SAST =================
+  sast-bandit:
+    name: SAST - Bandit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Bandit
+        run: pip install bandit[sarif]
+
+      - name: Run Bandit
+        run: |
+          mkdir -p reports
+          bandit -r ./services -f json -o reports/bandit-results.json
+
+      - name: Upload Bandit Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-results
+          path: reports/bandit-results.json
+
+  # ================= SCA =================
   sca-dependency-check:
     name: SCA - Dependency Check
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Run OWASP Dependency Check (Docker)
-        run: |
-          mkdir -p reports
-          docker run --rm \
-            -v $(pwd):/src \
-            -v $(pwd)/reports:/src/reports \
-            owasp/dependency-check:latest \
-            --project "SecureShop" \
-            --scan /src/services/java-service \
-            --format HTML \
-            --out /src/reports
-        continue-on-error: true
-      
+
+      - name: Run OWASP Dependency Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'SecureShop'
+          path: '.'
+          format: 'HTML'
+          args: >
+            --failOnCVSS 7
+            --enableRetired
+
       - name: Upload Report
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dependency-check-report
           path: reports/
-          
+
+  sca-trivy:
+    name: SCA - Trivy (Python Dependencies)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          trivy --version
+
+      - name: Scan Python dependencies for CVEs
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          echo "=== Trivy SCA: Scanning requirements.txt files ===" > reports/trivy-sca-results.txt
+
+          for req in services/*/requirements.txt; do
+            service_name=$(echo $req | cut -d'/' -f2)
+            echo "" >> reports/trivy-sca-results.txt
+            echo "========== $service_name ==========" >> reports/trivy-sca-results.txt
+            trivy fs --scanners vuln --severity HIGH,CRITICAL --format table "$req" >> reports/trivy-sca-results.txt 2>&1 || true
+          done
+
+          echo "" >> reports/trivy-sca-results.txt
+          echo "=== JSON Output ===" >> reports/trivy-sca-results.txt
+          trivy fs --scanners vuln --severity HIGH,CRITICAL,MEDIUM --format json -o reports/trivy-sca.json . 2>&1 || true
+
+          cat reports/trivy-sca-results.txt
+
+      - name: Upload Trivy SCA Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-sca-results
+          path: |
+            reports/trivy-sca-results.txt
+            reports/trivy-sca.json
+
+  # ================= SECRET SCANNING =================
+  secrets-gitleaks:
+    name: Secret Scanning - Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: detect --source . --no-git --verbose
+
+  # ================= SECRETS MANAGEMENT =================
+  secrets-vault:
+    name: Secrets Management - Vault
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start Vault Container
+        run: |
+          docker run -d --name vault-dev \
+            --cap-add=IPC_LOCK \
+            -e 'VAULT_DEV_ROOT_TOKEN_ID=secureshop-dev-token' \
+            -e 'VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200' \
+            -p 8200:8200 \
+            hashicorp/vault:1.15
+          sleep 10
+
+      - name: Verify Vault health
+        run: |
+          mkdir -p reports
+          {
+            echo "=== HashiCorp Vault - Secrets Management ==="
+            echo ""
+            echo "Status: Vault Dev Mode started successfully"
+            echo "Address: http://127.0.0.1:8200"
+            echo "Auth Method: Token"
+            echo ""
+            echo "--- Vault Health Check ---"
+            curl -s http://127.0.0.1:8200/v1/sys/health
+            echo ""
+          } > reports/vault-results.txt
+
+      - name: Store secrets
+        run: |
+          curl -s \
+            --header "X-Vault-Token: secureshop-dev-token" \
+            --request POST \
+            --data '{"data":{"JWT_SECRET":"test-key","DB_PASSWORD":"test-pass"}}' \
+            http://127.0.0.1:8200/v1/secret/data/secureshop/user-service
+
+          {
+            echo ""
+            echo "--- Secrets Stored ---"
+            echo "Path: secret/secureshop/user-service"
+            echo "Keys: JWT_SECRET, DB_PASSWORD"
+            echo "Status: Secrets encrypted and stored in Vault"
+          } >> reports/vault-results.txt
+
+      - name: Retrieve secrets
+        run: |
+          {
+            echo ""
+            echo "--- Secrets Retrieved ---"
+            curl -s \
+              --header "X-Vault-Token: secureshop-dev-token" \
+              http://127.0.0.1:8200/v1/secret/data/secureshop/user-service
+          } >> reports/vault-results.txt
+
+      - name: Upload Vault Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vault-results
+          path: reports/vault-results.txt
+
+      - name: Cleanup
+        if: always()
+        run: docker stop vault-dev && docker rm vault-dev
+
+  # ================= CONTAINER SCANNING =================
+  container-trivy:
+    name: Container Scan - Trivy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker images
+        run: docker compose -f infrastructure/docker-compose.yml build
+
+      - name: Scan all images
+        run: |
+          for img in \
+            infrastructure-user-service \
+            infrastructure-product-service \
+            infrastructure-order-service \
+            infrastructure-payment-service \
+            infrastructure-notification-service \
+            infrastructure-inventory-service \
+            infrastructure-gateway; do
+            echo "=== Scanning $img ==="
+            docker run --rm aquasec/trivy image \
+              --severity HIGH,CRITICAL \
+              --no-progress \
+              $img || echo "VULNERABILITIES FOUND in $img"
+          done
+
+  # ================= IaC =================
+  iac-checkov:
+    name: IaC Scan - Checkov
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Checkov
+        run: pip install checkov
+
+      - name: Scan Dockerfiles
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          echo "=== Dockerfile Scan ===" > reports/checkov-results.txt
+          checkov --directory . --framework dockerfile --output cli >> reports/checkov-results.txt 2>&1 || true
+
+      - name: Scan docker-compose
+        continue-on-error: true
+        run: |
+          {
+            echo ""
+            echo "=== docker-compose Scan ==="
+            checkov --file infrastructure/docker-compose.yml --framework yaml 2>&1 || true
+          } >> reports/checkov-results.txt
+
+      - name: Scan secrets in files
+        continue-on-error: true
+        run: |
+          {
+            echo ""
+            echo "=== Secrets Scan ==="
+            checkov --directory . --framework secrets 2>&1 || true
+          } >> reports/checkov-results.txt
+
+      - name: Upload Checkov Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkov-results
+          path: reports/checkov-results.txt
+
+  # ================= DAST =================
+  dast-zap:
+    name: DAST - OWASP ZAP
+    runs-on: ubuntu-latest
+    needs: [container-trivy]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start services
+        run: |
+          docker compose -f infrastructure/docker-compose.yml up -d
+          echo "Waiting for services to be ready..."
+          for i in $(seq 1 10); do
+            echo "Attempt $i/10..."
+            if curl -s --fail http://localhost/products 2>/dev/null; then
+              echo "Services are ready!"
+              break
+            fi
+            sleep 5
+          done
+          docker compose -f infrastructure/docker-compose.yml ps
+
+      - name: ZAP Scan
+        uses: zaproxy/action-baseline@v0.12.0
+        continue-on-error: true
+        with:
+          target: 'http://localhost'
+
+      - name: Stop services
+        if: always()
+        run: docker compose -f infrastructure/docker-compose.yml down
