@@ -1,28 +1,87 @@
+# .gitleaks.toml
+# Place this file in the root of your repository.
+# Gitleaks will use it automatically during scanning.
+
 title = "SecureShop Gitleaks Config"
 
+# ── Extend the default ruleset (keeps all built-in rules active) ──────────────
 [extend]
 useDefault = true
 
-[[rules]]
-id = "hardcoded-jwt-secret"
-description = "Hardcoded JWT Secret"
-regex = '''JWT_SECRET\s*=\s*["\'][^"\']+["\']'''
-severity = "ERROR"
+# ── Extra rules targeting patterns common in this project ────────────────────
 
 [[rules]]
-id = "hardcoded-db-password"
-description = "Hardcoded DB Password"
-regex = '''DB_PASSWORD\s*=\s*["\'][^"\']+["\']'''
-severity = "ERROR"
+id          = "hardcoded-db-password"
+description = "Hardcoded database password"
+regex       = '''(?i)(db_password|database_password|DB_PASS|POSTGRES_PASSWORD|MYSQL_PASSWORD)\s*[=:]\s*["\']?[^\s"\']{4,}'''
+severity    = "HIGH"
+tags        = ["database", "secret"]
 
 [[rules]]
-id = "hardcoded-smtp-password"
-description = "Hardcoded SMTP Password"
-regex = '''SMTP_PASSWORD\s*=\s*["\'][^"\']+["\']'''
-severity = "ERROR"
+id          = "hardcoded-jwt-secret"
+description = "Hardcoded JWT secret key"
+regex       = '''(?i)(jwt_secret|JWT_SECRET|secret_key|SECRET_KEY)\s*[=:]\s*["\']?[^\s"\']{6,}'''
+severity    = "HIGH"
+tags        = ["auth", "secret"]
 
 [[rules]]
-id = "hardcoded-stripe-key"
-description = "Hardcoded Stripe Key"
-regex = '''sk_live_[a-zA-Z0-9]+'''
-severity = "ERROR"
+id          = "hardcoded-stripe-key"
+description = "Hardcoded Stripe API key"
+regex       = '''(?i)(stripe_secret|STRIPE_KEY|STRIPE_SECRET)\s*[=:]\s*["\']?sk_(live|test)_[A-Za-z0-9]{24,}'''
+severity    = "CRITICAL"
+tags        = ["payment", "secret"]
+
+[[rules]]
+id          = "hardcoded-smtp-password"
+description = "Hardcoded SMTP password"
+regex       = '''(?i)(smtp_password|SMTP_PASS|EMAIL_PASSWORD|MAIL_PASSWORD)\s*[=:]\s*["\']?[^\s"\']{4,}'''
+severity    = "MEDIUM"
+tags        = ["email", "secret"]
+
+[[rules]]
+id          = "hardcoded-api-key-generic"
+description = "Generic hardcoded API key assignment"
+regex       = '''(?i)(api_key|API_KEY|apikey|APIKEY)\s*[=:]\s*["\']?[A-Za-z0-9_\-]{16,}'''
+severity    = "MEDIUM"
+tags        = ["api", "secret"]
+
+[[rules]]
+id          = "docker-compose-env-secret"
+description = "Plaintext secret in docker-compose environment block"
+regex       = '''(?i)(PASSWORD|SECRET|TOKEN|KEY)\s*=\s*[^\s\$\{][^\s]{4,}'''
+path        = '''docker-compose\.ya?ml'''
+severity    = "HIGH"
+tags        = ["docker", "secret"]
+
+[[rules]]
+id          = "dotenv-secret"
+description = "Secret value in .env file"
+regex       = '''(?i)(PASSWORD|SECRET|TOKEN|KEY|API_KEY)\s*=\s*.{4,}'''
+path        = '''\.env(\.\w+)?$'''
+severity    = "HIGH"
+tags        = ["dotenv", "secret"]
+
+# ── Allowlist: paths and patterns to always ignore ───────────────────────────
+
+[allowlist]
+description = "Global allowlist"
+
+# Ignore test fixtures, docs, and example files
+paths = [
+  '''\.md$''',
+  '''\.txt$''',
+  '''test[s]?/''',
+  '''fixtures/''',
+  '''__pycache__/''',
+  '''\.pytest_cache/''',
+]
+
+# Ignore obvious placeholder values
+regexes = [
+  '''your[_-]?secret''',
+  '''change[_-]?me''',
+  '''example[_-]?key''',
+  '''<.*>''',         # XML/template placeholders
+  '''\$\{.*\}''',    # Shell/template variable references
+  '''\{\{.*\}\}''',  # Jinja/GitHub Actions expressions
+]

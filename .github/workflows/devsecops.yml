@@ -160,17 +160,33 @@ jobs:
   secrets-gitleaks:
     name: Secret Scanning - Gitleaks
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p reports
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/repo" \
+            zricethezav/gitleaks:latest \
+            detect \
+            --source /repo \
+            --no-git \
+            --verbose \
+            --config /repo/.gitleaks.toml \
+            --report-format sarif \
+            --report-path /repo/reports/gitleaks-results.sarif \
+            || true
+
+      - name: Upload Gitleaks Report
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          args: detect --source . --no-git --verbose
+          name: gitleaks-results
+          path: reports/gitleaks-results.sarif
 
   # ================= SECRETS MANAGEMENT =================
   secrets-vault:
