@@ -329,12 +329,41 @@ jobs:
 
       - name: Generate Trivy SARIF report
         run: |
-          trivy image \
-            --severity HIGH,CRITICAL \
-            --no-progress \
-            --format sarif \
-            --output reports/trivy-container.sarif \
-            infrastructure-user-service 2>/dev/null || true
+          mkdir -p reports/trivy-sarif
+          for img in \
+            infrastructure-user-service \
+            infrastructure-product-service \
+            infrastructure-order-service \
+            infrastructure-payment-service \
+            infrastructure-notification-service \
+            infrastructure-inventory-service \
+            infrastructure-gateway; do
+            trivy image \
+              --severity HIGH,CRITICAL \
+              --no-progress \
+              --format sarif \
+              --output "reports/trivy-sarif/$img.sarif" \
+              "$img" 2>/dev/null || true
+          done
+
+          # Merge all SARIF files into one
+          python3 - << 'PYEOF'
+import json, os, glob
+
+runs = []
+for f in glob.glob("reports/trivy-sarif/*.sarif"):
+    try:
+        with open(f) as fh:
+            data = json.load(fh)
+            runs.extend(data.get("runs", []))
+    except Exception:
+        pass
+
+merged = {"version": "2.1.0", "$schema": "https://json.schemastore.org/sarif-2.1.0.json", "runs": runs}
+with open("reports/trivy-container.sarif", "w") as fh:
+    json.dump(merged, fh)
+print(f"Merged {len(runs)} runs into reports/trivy-container.sarif")
+PYEOF
 
       - name: Upload Trivy Container Report
         if: always()
