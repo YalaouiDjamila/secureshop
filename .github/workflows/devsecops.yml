@@ -16,7 +16,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  
+
   # ================= SCA - OWASP DEPENDENCY CHECK =================
   sca-dependency-check:
     name: SCA - Dependency Check
@@ -44,3 +44,43 @@ jobs:
         with:
           name: dependency-check-report
           path: reports/
+
+
+  # ================= IaC - CHECKOV =================
+  iac-checkov:
+    name: IaC Scan - Checkov
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Checkov
+        run: pip install checkov
+      
+      - name: Scan Dockerfiles
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          echo "=== Dockerfile Scan ===" > reports/checkov-results.txt
+          checkov --directory . --framework dockerfile --output cli >> reports/checkov-results.txt 2>&1 || true
+      
+      - name: Scan docker-compose
+        continue-on-error: true
+        run: |
+          echo "" >> reports/checkov-results.txt
+          echo "=== docker-compose Scan ===" >> reports/checkov-results.txt
+          checkov --file infrastructure/docker-compose.yml --framework yaml >> reports/checkov-results.txt 2>&1 || true
+      
+      - name: Scan secrets in files
+        continue-on-error: true
+        run: |
+          echo "" >> reports/checkov-results.txt
+          echo "=== Secrets Scan ===" >> reports/checkov-results.txt
+          checkov --directory . --framework secrets >> reports/checkov-results.txt 2>&1 || true
+      
+      - name: Upload Checkov Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkov-results
+          path: reports/checkov-results.txt
