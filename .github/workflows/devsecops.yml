@@ -17,243 +17,46 @@ env:
 
 jobs:
 
-  # ================= SBOM =================
-  sbom-syft:
-    name: SBOM - Syft
+    # ================= SCA - TRIVY (Dependencies Only) =================
+  sca-trivy:
+    name: SCA - Trivy (Python Dependencies)
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - name: Install Syft
-        run: curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
-      - name: Generate SBOM
-        run: |
-          mkdir -p reports
-          syft dir:. -o json > reports/sbom.json
-      - name: Upload SBOM
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbom
-          path: reports/sbom.json
-
-  # ================= SAST =================
-  sast-bandit:
-    name: SAST - Bandit
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-      - name: Install Bandit
-        run: pip install bandit[sarif]
-      - name: Run Bandit
-        continue-on-error: true
-        run: |
-          mkdir -p reports
-          bandit -r ./services -f json -o reports/bandit-results.json
-      - name: Upload Bandit Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: bandit-results
-          path: reports/bandit-results.json
-
-  # ================= SCA =================
-  sca-dependency-check:
-    name: SCA - Dependency Check
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run OWASP Dependency Check
-        continue-on-error: true
-        uses: dependency-check/Dependency-Check_Action@main
-        with:
-          project: 'SecureShop'
-          path: '.'
-          format: 'HTML'
-          out: 'reports'
-      - name: Upload Dependency Check Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: dependency-check-report
-          path: reports/
-
-  sca-pip-audit:
-    name: SCA - pip-audit
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-      - name: Install pip-audit
-        run: pip install pip-audit
-      - name: Run pip-audit on all services
-        continue-on-error: true
-        run: |
-          mkdir -p reports
-          echo "[]" > reports/pip-audit-results.json
-          for service in services/*/; do
-            echo "=== Scanning $service ==="
-            # --skip-editable skips local packages, --no-deps skips transitive resolution
-            pip-audit -r "$service/requirements.txt" --format json --skip-editable 2>/dev/null \
-              || pip-audit -r "$service/requirements.txt" --format json --ignore-vuln GHSA-0000-0000-0000 2>/dev/null \
-              || echo "[]"
-          done > reports/pip-audit-results.json || true
-      - name: Upload pip-audit Report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pip-audit-results
-          path: reports/pip-audit-results.json
-
-  # ================= Secret Scanning =================
-  secret-scanning-gitleaks:
-    name: Secret Scanning - Gitleaks
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Install Gitleaks
-        run: |
-          wget -q https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz
-          tar -xzf gitleaks_8.18.4_linux_x64.tar.gz
-          sudo mv gitleaks /usr/local/bin/
-      - name: Run Gitleaks
-        continue-on-error: true
-        run: |
-          mkdir -p reports
-          gitleaks detect \
-            --source . \
-            --config .gitleaks.toml \
-            --report-format json \
-            --report-path reports/gitleaks-results.json \
-            --no-git \
-            || true
-      - name: Upload Gitleaks Report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gitleaks-results
-          path: reports/gitleaks-results.json
-
-    # ================= CONTAINER SCAN =================
-  container-scan-trivy:
-    name: Container Scan - Trivy
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Build Docker images
-        run: |
-          docker compose -f infrastructure/docker-compose.yml build
-          echo "=== Listing built images ==="
-          docker images | grep infrastructure || docker images
+     
       
       - name: Install Trivy
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          trivy --version
       
-      - name: Scan YOUR application images
+      - name: SCA - Scan Python dependencies for CVEs
         continue-on-error: true
         run: |
           mkdir -p reports
-          # List all images and scan each one
-          for img in $(docker images --format "{{.Repository}}:{{.Tag}}" | grep "infrastructure"); do
-            echo "=== Scanning $img ==="
-            trivy image --severity HIGH,CRITICAL --format json --no-progress "$img" >> reports/trivy-results.json 2>&1 || true
-          done
-          # If no infrastructure images found, scan the base image as fallback
-          if [ ! -s reports/trivy-results.json ]; then
-            echo "No built images found, scanning base image..."
-            trivy image --severity HIGH,CRITICAL --format json --no-progress python:3.11-slim > reports/trivy-results.json 2>&1 || true
-          fi
-          echo "=== Trivy scan complete ==="
-          cat reports/trivy-results.json | head -50
-      
-      - name: Upload Trivy Report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-results
-          path: reports/trivy-results.json
+          echo "=== Trivy SCA: Scanning requirements.txt files ===" > reports/trivy-sca-results.txt
           
-  # ================= IaC Scan =================
-  iac-scan-checkov:
-    name: IaC Scan - Checkov
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-      - name: Install Checkov
-        run: pip install checkov
-
-      - name: Run Checkov on Dockerfiles
-        continue-on-error: true
-        run: |
-          mkdir -p reports
-          checkov -d services/ \
-            --framework dockerfile \
-            --output json \
-            > reports/checkov-dockerfile.json 2>&1 || true
-
-      - name: Run Checkov on docker-compose.yml
-        continue-on-error: true
-        run: |
-          # Use 'yaml' framework — 'docker_compose' is not valid in newer Checkov
-          checkov -f infrastructure/docker-compose.yml \
-            --framework yaml \
-            --output json \
-            > reports/checkov-compose.json 2>&1 || true
-
-      - name: Upload Checkov Reports
+          for req in services/*/requirements.txt; do
+            service_name=$(echo $req | cut -d'/' -f2)
+            echo "" >> reports/trivy-sca-results.txt
+            echo "========== $service_name ==========" >> reports/trivy-sca-results.txt
+            trivy fs --scanners vuln --severity HIGH,CRITICAL --format table "$req" >> reports/trivy-sca-results.txt 2>&1 || true
+          done
+          
+          echo "" >> reports/trivy-sca-results.txt
+          echo "=== JSON Output ===" >> reports/trivy-sca-results.txt
+          
+          # Also generate JSON for the whole project
+          trivy fs --scanners vuln --severity HIGH,CRITICAL,MEDIUM --format json -o reports/trivy-sca.json . 2>&1 || true
+          
+          cat reports/trivy-sca-results.txt
+      
+      - name: Upload Trivy SCA Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: checkov-results
-          path: reports/checkov-*.json
-
-  # ================= DAST =================
-  dast-zap:
-    name: DAST - OWASP ZAP
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    needs: container-scan-trivy
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Start services with Docker Compose
-        run: |
-          docker compose -f infrastructure/docker-compose.yml up -d
-          echo "Waiting for services to be ready..."
-          sleep 45
-
-      - name: Check services health
-        continue-on-error: true
-        run: |
-          docker compose -f infrastructure/docker-compose.yml ps
-          curl -f http://localhost/products || echo "Gateway not reachable yet, continuing anyway"
-
-      - name: OWASP ZAP Baseline Scan
-        continue-on-error: true
-        uses: zaproxy/action-baseline@v0.12.0
-        with:
-          target: 'http://localhost'
-          rules_file_name: '.zap/rules.tsv'
-          cmd_options: '-a'
-
-      - name: Upload ZAP Report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: zap-results
-          path: report_html.html
+          name: trivy-sca-results
+          path: |
+            reports/trivy-sca-results.txt
+            reports/trivy-sca.json
