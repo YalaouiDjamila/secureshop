@@ -6,16 +6,38 @@ import hashlib
 import subprocess
 import os
 import pickle
+import requests
 
 # ⚠️ VULNERABLE: Debug mode enabled
 app = FastAPI(title="User Service", debug=True)
 
-# ⚠️ VULNERABLE: Hardcoded secrets (Gitleaks + Bandit)
-JWT_SECRET = "supersecretkey123"
-DB_PASSWORD = "admin123"
-AWS_SECRET_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-ADMIN_PASSWORD = "admin123!"
-API_KEY = "sk-1234567890abcdef"
+# ✅ SECRETS FROM VAULT (Fallback to env vars for pipeline testing)
+VAULT_ADDR = os.getenv("VAULT_ADDR", "http://vault:8200")
+VAULT_TOKEN = os.getenv("VAULT_TOKEN", "secureshop-dev-token")
+
+def get_vault_secret(path: str) -> dict:
+    """Fetch secrets from HashiCorp Vault"""
+    try:
+        response = requests.get(
+            f"{VAULT_ADDR}/v1/{path}",
+            headers={"X-Vault-Token": VAULT_TOKEN},
+            timeout=5
+        )
+        if response.status_code == 200:
+            return response.json()["data"]["data"]
+    except Exception:
+        pass
+    return {}
+
+# Try Vault first, fallback to env vars (for pipeline detection)
+vault_secrets = get_vault_secret("secret/secureshop/user-service")
+
+# ⚠️ VULNERABLE: Fallback secrets for pipeline detection (Gitleaks + Bandit)
+JWT_SECRET = vault_secrets.get("JWT_SECRET") or os.getenv("JWT_SECRET") or "supersecretkey123"
+DB_PASSWORD = vault_secrets.get("DB_PASSWORD") or os.getenv("DB_PASSWORD") or "admin123"
+AWS_SECRET_KEY = vault_secrets.get("AWS_SECRET_KEY") or os.getenv("AWS_SECRET_KEY") or "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+ADMIN_PASSWORD = vault_secrets.get("ADMIN_PASSWORD") or os.getenv("ADMIN_PASSWORD") or "admin123!"
+API_KEY = vault_secrets.get("API_KEY") or os.getenv("API_KEY") or "sk-1234567890abcdef"
 
 users_db = []
 
@@ -101,14 +123,12 @@ def get_users():
         for u in users_db
     ]
 
-
 @app.get("/users/{user_id}")
 def get_user(user_id: str):
     for u in users_db:
         if u["id"] == user_id:
             return {"id": u["id"], "username": u["username"], "email": u.get("email")}
     raise HTTPException(status_code=404, detail="User not found")
-
 
 @app.get("/")
 def root():

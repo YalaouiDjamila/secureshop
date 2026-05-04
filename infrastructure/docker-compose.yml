@@ -18,10 +18,15 @@ services:
     build:
       context: ../services/user-service
     environment:
-      - JWT_SECRET=supersecretkey123        # Checkov: hardcoded secret
-      - DB_PASSWORD=admin123                # Checkov: hardcoded secret
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=secureshop-dev-token
+      # ⚠️ VULNERABLE: Secrets below for Checkov detection
+      - JWT_SECRET=supersecretkey123
+      - DB_PASSWORD=admin123
     ports:
       - "8001:8000"
+    depends_on:
+      - vault
     networks:
       - secureshop-network
 
@@ -45,10 +50,15 @@ services:
     build:
       context: ../services/payment-service
     environment:
-      - STRIPE_KEY=sk_live_4eC39HqLyjWDarjtT1zdp7dc    # Checkov: hardcoded secret
-      - PAYMENT_DB_PASSWORD=P@ssw0rd2024!               # Checkov: hardcoded secret
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=secureshop-dev-token
+      # ⚠️ VULNERABLE: Secrets below for Checkov detection
+      - STRIPE_KEY=sk_live_4eC39HqLyjWDarjtT1zdp7dc
+      - PAYMENT_DB_PASSWORD=P@ssw0rd2024!
     ports:
       - "8004:8000"
+    depends_on:
+      - vault
     networks:
       - secureshop-network
 
@@ -56,10 +66,15 @@ services:
     build:
       context: ../services/notification-service
     environment:
-      - SMTP_PASSWORD=EmailP@ss123          # Checkov: hardcoded secret
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=secureshop-dev-token
+      # ⚠️ VULNERABLE: Secrets below for Checkov detection
+      - SMTP_PASSWORD=EmailP@ss123
       - SMTP_USER=noreply@secureshop.com
     ports:
       - "8005:8000"
+    depends_on:
+      - vault
     networks:
       - secureshop-network
 
@@ -72,15 +87,30 @@ services:
       - secureshop-network
 
   db:
-    image: postgres:13                      # Checkov: unpinned/old image
+    image: postgres:13
     environment:
-      POSTGRES_PASSWORD: admin123           # Checkov: hardcoded password
+      POSTGRES_PASSWORD: admin123
       POSTGRES_USER: admin
       POSTGRES_DB: secureshop
     ports:
-      - "5432:5432"                         # Checkov: DB port exposed to host
+      - "5432:5432"
     networks:
       - secureshop-network
+
+  # ================= HASHICORP VAULT =================
+  vault:
+    image: hashicorp/vault:1.15
+    container_name: vault
+    cap_add:
+      - IPC_LOCK
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: secureshop-dev-token
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    ports:
+      - "8200:8200"
+    networks:
+      - secureshop-network
+    command: vault server -dev
 
 networks:
   secureshop-network:
