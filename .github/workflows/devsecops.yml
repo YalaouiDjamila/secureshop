@@ -547,3 +547,30 @@ jobs:
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
+  lint-hadolint:
+   name: Linting - Hadolint (All Dockerfiles)
+   runs-on: ubuntu-latest
+
+   steps:
+     - uses: actions/checkout@v4
+
+     - name: Run Hadolint on all services
+       run: |
+         mkdir -p reports
+         echo "=== HADOLINT REPORT ===" > reports/hadolint-report.txt
+
+         for file in $(find . -type f -name "Dockerfile"); do
+           echo "" >> reports/hadolint-report.txt
+           echo "=========================" >> reports/hadolint-report.txt
+           echo "Scanning: $file" >> reports/hadolint-report.txt
+           echo "=========================" >> reports/hadolint-report.txt
+
+           docker run --rm -i hadolint/hadolint < "$file" >> reports/hadolint-report.txt || true
+         done
+
+     - name: Upload Hadolint Report
+       if: always()
+       uses: actions/upload-artifact@v4
+       with:
+         name: hadolint-report
+         path: reports/hadolint-report.txt
