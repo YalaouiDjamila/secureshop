@@ -369,11 +369,38 @@ jobs:
           done
           docker compose -f infrastructure/docker-compose.yml ps
 
+      - name: Fix ZAP workspace permissions
+        run: |
+          mkdir -p reports
+          touch zap.yaml report_json.json report_md.md report_html.html
+          chmod a+w zap.yaml report_json.json report_md.md report_html.html
+
       - name: ZAP Scan
         uses: zaproxy/action-baseline@v0.12.0
         continue-on-error: true
         with:
           target: 'http://localhost'
+          report_html: report_html.html
+          report_json: report_json.json
+          report_md: report_md.md
+
+      - name: Move ZAP reports to reports dir
+        if: always()
+        run: |
+          mkdir -p reports
+          [ -f report_html.html ] && mv report_html.html reports/zap-report.html || true
+          [ -f report_json.json ] && mv report_json.json reports/zap-report.json || true
+          [ -f report_md.md ]    && mv report_md.md    reports/zap-report.md   || true
+
+      - name: Upload ZAP Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-results
+          path: |
+            reports/zap-report.html
+            reports/zap-report.json
+            reports/zap-report.md
 
       - name: Stop services
         if: always()
