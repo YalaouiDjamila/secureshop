@@ -17,46 +17,31 @@ env:
 
 jobs:
 
-    # ================= SCA - TRIVY (Dependencies Only) =================
-  sca-trivy:
-    name: SCA - Trivy (Python Dependencies)
+  # ================= SCA - OWASP DEPENDENCY CHECK =================
+  sca-dependency-check:
+    name: SCA - OWASP Dependency Check
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-     
       
-      - name: Install Trivy
-        run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-          trivy --version
-      
-      - name: SCA - Scan Python dependencies for CVEs
+      - name: Run OWASP Dependency Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'SecureShop'
+          path: '.'
+          format: 'HTML'
+          args: >
+            --failOnCVSS 0
+            --enableRetired
+            --enableExperimental
+            --scanSet
         continue-on-error: true
-        run: |
-          mkdir -p reports
-          echo "=== Trivy SCA: Scanning requirements.txt files ===" > reports/trivy-sca-results.txt
-          
-          for req in services/*/requirements.txt; do
-            service_name=$(echo $req | cut -d'/' -f2)
-            echo "" >> reports/trivy-sca-results.txt
-            echo "========== $service_name ==========" >> reports/trivy-sca-results.txt
-            trivy fs --scanners vuln --severity HIGH,CRITICAL --format table "$req" >> reports/trivy-sca-results.txt 2>&1 || true
-          done
-          
-          echo "" >> reports/trivy-sca-results.txt
-          echo "=== JSON Output ===" >> reports/trivy-sca-results.txt
-          
-          # Also generate JSON for the whole project
-          trivy fs --scanners vuln --severity HIGH,CRITICAL,MEDIUM --format json -o reports/trivy-sca.json . 2>&1 || true
-          
-          cat reports/trivy-sca-results.txt
       
-      - name: Upload Trivy SCA Report
-        if: always()
+      - name: Upload Dependency Check Report
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-sca-results
+          name: dependency-check-report
           path: |
-            reports/trivy-sca-results.txt
-            reports/trivy-sca.json
+            reports/
+            dependency-check-report.html
