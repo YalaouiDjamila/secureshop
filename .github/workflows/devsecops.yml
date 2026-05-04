@@ -25,35 +25,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install Java (required)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y default-jre
-          java -version
-      
+
       - name: Run Dependency Check
         uses: dependency-check/Dependency-Check_Action@main
         with:
           project: 'SecureShop'
-          path: '.'
+          path: 'services/java-service'          # ← Point to Java service
           format: 'HTML'
           args: >
             --failOnCVSS 0
-            --out reports
+            --scan services/java-service/pom.xml
         continue-on-error: true
       
-      - name: Check report exists
-        run: |
-          mkdir -p reports
-          ls -la reports/ || echo "No reports directory"
-          ls -la || echo "Checking root"
-      
+        
       - name: Upload Dependency Check Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dependency-check-report
-          path: |
-            reports/
-            *.html
-            dependency-check-report.html
+          path: reports/
