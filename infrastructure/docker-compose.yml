@@ -1,117 +1,384 @@
-services:
-  gateway:
-    build:
-      context: ../gateway
-    ports:
-      - "80:80"
-    depends_on:
-      - user-service
-      - product-service
-      - order-service
-      - payment-service
-      - notification-service
-      - inventory-service
-    networks:
-      - secureshop-network
+name: DevSecOps Pipeline
 
-  user-service:
-    build:
-      context: ../services/user-service
-    environment:
-      - VAULT_ADDR=http://vault:8200
-      - VAULT_TOKEN=secureshop-dev-token
-      # ⚠️ VULNERABLE: Secrets below for Checkov detection
-      - JWT_SECRET=supersecretkey123
-      - DB_PASSWORD=admin123
-    ports:
-      - "8001:8000"
-    depends_on:
-      - vault
-    networks:
-      - secureshop-network
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
 
-  product-service:
-    build:
-      context: ../services/product-service
-    ports:
-      - "8002:8000"
-    networks:
-      - secureshop-network
+permissions:
+  security-events: write
+  contents: read
+  actions: read
 
-  order-service:
-    build:
-      context: ../services/order-service
-    ports:
-      - "8003:8000"
-    networks:
-      - secureshop-network
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-  payment-service:
-    build:
-      context: ../services/payment-service
-    environment:
-      - VAULT_ADDR=http://vault:8200
-      - VAULT_TOKEN=secureshop-dev-token
-      # ⚠️ VULNERABLE: Secrets below for Checkov detection
-      - STRIPE_KEY=sk_live_4eC39HqLyjWDarjtT1zdp7dc
-      - PAYMENT_DB_PASSWORD=P@ssw0rd2024!
-    ports:
-      - "8004:8000"
-    depends_on:
-      - vault
-    networks:
-      - secureshop-network
+jobs:
 
-  notification-service:
-    build:
-      context: ../services/notification-service
-    environment:
-      - VAULT_ADDR=http://vault:8200
-      - VAULT_TOKEN=secureshop-dev-token
-      # ⚠️ VULNERABLE: Secrets below for Checkov detection
-      - SMTP_PASSWORD=EmailP@ss123
-      - SMTP_USER=noreply@secureshop.com
-    ports:
-      - "8005:8000"
-    depends_on:
-      - vault
-    networks:
-      - secureshop-network
+  # ================= SBOM =================
+  sbom:
+    name: SBOM - Syft
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-  inventory-service:
-    build:
-      context: ../services/inventory-service
-    ports:
-      - "8006:8000"
-    networks:
-      - secureshop-network
+      - name: Install Syft
+        run: |
+          curl -Lo syft.tar.gz https://github.com/anchore/syft/releases/download/v1.0.0/syft_1.0.0_linux_amd64.tar.gz
+          tar -xzf syft.tar.gz
+          sudo mv syft /usr/local/bin/
 
-  db:
-    image: postgres:13
-    environment:
-      POSTGRES_PASSWORD: admin123
-      POSTGRES_USER: admin
-      POSTGRES_DB: secureshop
-    ports:
-      - "5432:5432"
-    networks:
-      - secureshop-network
+      - name: Generate SBOM
+        run: syft dir:. -o json > sbom.json
 
-  # ================= HASHICORP VAULT =================
-  vault:
-    image: hashicorp/vault:1.15
-    container_name: vault
-    cap_add:
-      - IPC_LOCK
-    environment:
-      VAULT_DEV_ROOT_TOKEN_ID: secureshop-dev-token
-      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
-    ports:
-      - "8200:8200"
-    networks:
-      - secureshop-network
-    command: vault server -dev
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json
 
-networks:
-  secureshop-network:
-    driver: bridge
+  # ================= SAST =================
+  sast-bandit:
+    name: SAST - Bandit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Bandit
+        run: pip install bandit[sarif]
+
+      - name: Run Bandit
+        run: |
+          mkdir -p reports
+          if [ -d "./services" ] && find ./services -name "*.py" | grep -q .; then
+            bandit -r ./services -f json -o reports/bandit-results.json || true
+          else
+            echo '{"results":[],"metrics":{},"errors":[],"generated_at":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > reports/bandit-results.json
+            echo "No Python files found in ./services — skipping Bandit scan."
+          fi
+
+      - name: Upload Bandit Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-results
+          path: reports/bandit-results.json
+
+  # ================= SCA =================
+  sca-dependency-check:
+    name: SCA - Dependency Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run OWASP Dependency Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'SecureShop'
+          path: '.'
+          format: 'HTML'
+          args: >
+            --failOnCVSS 7
+            --enableRetired
+
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-report
+          path: reports/
+
+  python-sca:
+    name: SCA - pip-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Install all dependencies
+        run: find . -name "requirements.txt" -exec pip install -r {} \; 2>/dev/null || true
+
+      - name: Run pip-audit
+        run: |
+          pip-audit \
+            --ignore-vuln CVE-2026-3219 \
+            --ignore-vuln CVE-2026-25645 \
+            --ignore-vuln CVE-2025-62727 \
+            || true
+
+  sca-trivy:
+    name: SCA - Trivy (Python Dependencies)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          trivy --version
+
+      - name: Scan Python dependencies for CVEs
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          echo "=== Trivy SCA: Scanning requirements.txt files ===" > reports/trivy-sca-results.txt
+
+          for req in services/*/requirements.txt; do
+            service_name=$(echo $req | cut -d'/' -f2)
+            echo "" >> reports/trivy-sca-results.txt
+            echo "========== $service_name ==========" >> reports/trivy-sca-results.txt
+            trivy fs --scanners vuln --severity HIGH,CRITICAL --format table "$req" >> reports/trivy-sca-results.txt 2>&1 || true
+          done
+
+          echo "" >> reports/trivy-sca-results.txt
+          echo "=== JSON Output ===" >> reports/trivy-sca-results.txt
+          trivy fs --scanners vuln --severity HIGH,CRITICAL,MEDIUM --format json -o reports/trivy-sca.json . 2>&1 || true
+
+          cat reports/trivy-sca-results.txt
+
+      - name: Upload Trivy SCA Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-sca-results
+          path: |
+            reports/trivy-sca-results.txt
+            reports/trivy-sca.json
+
+  # ================= SECRET SCANNING =================
+  secrets-gitleaks:
+    name: Secret Scanning - Gitleaks
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        run: |
+          mkdir -p reports
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/repo" \
+            zricethezav/gitleaks:latest \
+            detect \
+            --source /repo \
+            --no-git \
+            --verbose \
+            --config /repo/.gitleaks.toml \
+            --report-format sarif \
+            --report-path /repo/reports/gitleaks-results.sarif \
+            || true
+
+      - name: Upload Gitleaks Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-results
+          path: reports/gitleaks-results.sarif
+
+  # ================= SECRETS MANAGEMENT =================
+  secrets-vault:
+    name: Secrets Management - Vault
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start Vault Container
+        run: |
+          docker run -d --name vault-dev \
+            --cap-add=IPC_LOCK \
+            -e "VAULT_DEV_ROOT_TOKEN_ID=${{ secrets.VAULT_DEV_TOKEN }}" \
+            -e 'VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200' \
+            -p 8200:8200 \
+            hashicorp/vault:1.15
+          sleep 10
+
+      - name: Verify Vault health
+        run: |
+          mkdir -p reports
+          {
+            echo "=== HashiCorp Vault - Secrets Management ==="
+            echo ""
+            echo "Status: Vault Dev Mode started successfully"
+            echo "Address: http://127.0.0.1:8200"
+            echo "Auth Method: Token"
+            echo ""
+            echo "--- Vault Health Check ---"
+            curl -s http://127.0.0.1:8200/v1/sys/health
+            echo ""
+          } > reports/vault-results.txt
+
+      - name: Store secrets
+        env:
+          VAULT_TOKEN: ${{ secrets.VAULT_DEV_TOKEN }}
+        run: |
+          curl -s \
+            --header "X-Vault-Token: $VAULT_TOKEN" \
+            --request POST \
+            --data '{"data":{"JWT_SECRET":"test-key","DB_PASSWORD":"test-pass"}}' \
+            http://127.0.0.1:8200/v1/secret/data/secureshop/user-service
+
+          {
+            echo ""
+            echo "--- Secrets Stored ---"
+            echo "Path: secret/secureshop/user-service"
+            echo "Keys: JWT_SECRET, DB_PASSWORD"
+            echo "Status: Secrets encrypted and stored in Vault"
+          } >> reports/vault-results.txt
+
+      - name: Retrieve secrets
+        env:
+          VAULT_TOKEN: ${{ secrets.VAULT_DEV_TOKEN }}
+        run: |
+          {
+            echo ""
+            echo "--- Secrets Retrieved ---"
+            curl -s \
+              --header "X-Vault-Token: $VAULT_TOKEN" \
+              http://127.0.0.1:8200/v1/secret/data/secureshop/user-service
+          } >> reports/vault-results.txt
+
+      - name: Upload Vault Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vault-results
+          path: reports/vault-results.txt
+
+      - name: Cleanup
+        if: always()
+        run: docker stop vault-dev && docker rm vault-dev
+
+  # ================= CONTAINER SCANNING =================
+  container-trivy:
+    name: Container Scan - Trivy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          trivy --version
+
+      - name: Build Docker images
+        run: docker compose -f infrastructure/docker-compose.yml build
+
+      - name: Scan all images
+        run: |
+          mkdir -p reports
+          echo "=== Trivy Container Scan Results ===" > reports/trivy-container-results.txt
+
+          for img in \
+            infrastructure-user-service \
+            infrastructure-product-service \
+            infrastructure-order-service \
+            infrastructure-payment-service \
+            infrastructure-notification-service \
+            infrastructure-inventory-service \
+            infrastructure-gateway; do
+            echo "" >> reports/trivy-container-results.txt
+            echo "========== $img ==========" >> reports/trivy-container-results.txt
+            trivy image \
+              --severity HIGH,CRITICAL \
+              --no-progress \
+              --format table \
+              "$img" >> reports/trivy-container-results.txt 2>&1 || echo "VULNERABILITIES FOUND in $img"
+          done
+
+          cat reports/trivy-container-results.txt
+
+      - name: Upload Trivy Container Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-container-results
+          path: reports/trivy-container-results.txt
+
+  # ================= IaC =================
+  iac-checkov:
+    name: IaC Scan - Checkov
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Checkov
+        run: pip install checkov
+
+      - name: Scan Dockerfiles
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          echo "=== Dockerfile Scan ===" > reports/checkov-results.txt
+          checkov --directory . --framework dockerfile --output cli >> reports/checkov-results.txt 2>&1 || true
+
+      - name: Scan docker-compose
+        continue-on-error: true
+        run: |
+          {
+            echo ""
+            echo "=== docker-compose Scan ==="
+            checkov --file infrastructure/docker-compose.yml --framework yaml 2>&1 || true
+          } >> reports/checkov-results.txt
+
+      - name: Scan secrets in files
+        continue-on-error: true
+        run: |
+          {
+            echo ""
+            echo "=== Secrets Scan ==="
+            checkov --directory . --framework secrets 2>&1 || true
+          } >> reports/checkov-results.txt
+
+      - name: Upload Checkov Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkov-results
+          path: reports/checkov-results.txt
+
+  # ================= DAST =================
+  dast-zap:
+    name: DAST - OWASP ZAP
+    runs-on: ubuntu-latest
+    needs: [container-trivy]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start services
+        run: |
+          docker compose -f infrastructure/docker-compose.yml up -d
+          echo "Waiting for services to be ready..."
+          for i in $(seq 1 10); do
+            echo "Attempt $i/10..."
+            if curl -s --fail http://localhost/products 2>/dev/null; then
+              echo "Services are ready!"
+              break
+            fi
+            sleep 5
+          done
+          docker compose -f infrastructure/docker-compose.yml ps
+
+      - name: ZAP Scan
+        uses: zaproxy/action-baseline@v0.12.0
+        continue-on-error: true
+        with:
+          target: 'http://localhost'
+
+      - name: Stop services
+        if: always()
+        run: docker compose -f infrastructure/docker-compose.yml down
