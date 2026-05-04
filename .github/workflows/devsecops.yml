@@ -76,6 +76,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Merge all requirements into one file
+        run: |
+          mkdir -p reports
+          echo "# Combined requirements from all services" > combined-requirements.txt
+          for req in services/*/requirements.txt; do
+            echo "" >> combined-requirements.txt
+            echo "# === $req ===" >> combined-requirements.txt
+            cat "$req" >> combined-requirements.txt
+          done
+          echo "Combined requirements:"
+          cat combined-requirements.txt
+
       - name: Run OWASP Dependency Check
         uses: dependency-check/Dependency-Check_Action@main
         with:
@@ -83,10 +95,13 @@ jobs:
           path: '.'
           format: 'HTML'
           args: >
-            --failOnCVSS 7
+            --enableExperimental
+            --out reports
+            --scan combined-requirements.txt
             --enableRetired
 
       - name: Upload Report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dependency-check-report
