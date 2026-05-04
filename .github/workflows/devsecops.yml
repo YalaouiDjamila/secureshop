@@ -11,6 +11,7 @@ permissions:
   security-events: write
   contents: read
   actions: read
+  issues: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -497,6 +498,7 @@ jobs:
           report_html: report_html.html
           report_json: report_json.json
           report_md: report_md.md
+          allow_issue_writing: true
 
       - name: Move ZAP reports to reports dir
         if: always()
@@ -515,13 +517,6 @@ jobs:
             reports/zap-report.html
             reports/zap-report.json
             reports/zap-report.md
-
-      - name: Upload ZAP SARIF to GitHub Security tab
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: reports/zap-report.json
-          category: zap-dast
 
       - name: Stop services
         if: always()
