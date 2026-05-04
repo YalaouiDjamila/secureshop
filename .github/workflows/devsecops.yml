@@ -313,20 +313,16 @@ jobs:
           echo "=== Trivy Container Scan Results ===" > reports/trivy-container-results.txt
 
           for img in \
-            infrastructure-user-service \
-            infrastructure-product-service \
-            infrastructure-order-service \
-            infrastructure-payment-service \
-            infrastructure-notification-service \
-            infrastructure-inventory-service \
-            infrastructure-gateway; do
-            echo "" >> reports/trivy-container-results.txt
-            echo "========== $img ==========" >> reports/trivy-container-results.txt
-            trivy image \
-              --severity HIGH,CRITICAL \
-              --no-progress \
-              --format table \
-              "$img" >> reports/trivy-container-results.txt 2>&1 || echo "VULNERABILITIES FOUND in $img"
+           secureshop-user-service \
+           secureshop-product-service \
+           secureshop-order-service \
+           secureshop-payment-service \
+           secureshop-notification-service \
+           secureshop-inventory-service \
+           secureshop-gateway; do
+
+           echo "Scanning $img"
+           trivy image --severity HIGH,CRITICAL "$img" >> reports/trivy-container-results.txt || true
           done
 
           cat reports/trivy-container-results.txt
