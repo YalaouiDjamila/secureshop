@@ -17,7 +17,7 @@ env:
 
 jobs:
 
-   # ================= SCA - OWASP DEPENDENCY CHECK =================
+    # ================= SCA - OWASP DEPENDENCY CHECK =================
   sca-dependency-check:
     name: SCA - Dependency Check
     runs-on: ubuntu-latest
@@ -25,12 +25,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Run OWASP Dependency Check
-        uses: dependency-check/Dependency-Check_Action@main
-        with:
-          project: 'SecureShop'
-          path: 'services/java-service'
-          format: 'HTML'
+      - name: Run OWASP Dependency Check (Docker)
+        run: |
+          mkdir -p reports
+          docker run --rm \
+            -v $(pwd):/src \
+            -v $(pwd)/reports:/src/reports \
+            owasp/dependency-check:latest \
+            --project "SecureShop" \
+            --scan /src/services/java-service \
+            --format HTML \
+            --out /src/reports
         continue-on-error: true
       
       - name: Upload Report
