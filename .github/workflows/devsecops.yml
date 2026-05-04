@@ -526,7 +526,8 @@ jobs:
       - name: Stop services
         if: always()
         run: docker compose -f infrastructure/docker-compose.yml down
- codeql:
+
+    codeql:
     name: SAST - CodeQL
     runs-on: ubuntu-latest
     permissions:
@@ -552,4 +553,4 @@ jobs:
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
-        
+ 
