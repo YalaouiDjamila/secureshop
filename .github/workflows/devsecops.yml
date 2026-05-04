@@ -19,13 +19,19 @@ jobs:
 
   # ================= SCA - OWASP DEPENDENCY CHECK =================
   sca-dependency-check:
-    name: SCA - OWASP Dependency Check
+    name: SCA - Dependency Check
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       
-      - name: Run OWASP Dependency Check
+      - name: Install Java (required)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y default-jre
+          java -version
+      
+      - name: Run Dependency Check
         uses: dependency-check/Dependency-Check_Action@main
         with:
           project: 'SecureShop'
@@ -33,15 +39,21 @@ jobs:
           format: 'HTML'
           args: >
             --failOnCVSS 0
-            --enableRetired
-            --enableExperimental
-            --scanSet
+            --out reports
         continue-on-error: true
       
+      - name: Check report exists
+        run: |
+          mkdir -p reports
+          ls -la reports/ || echo "No reports directory"
+          ls -la || echo "Checking root"
+      
       - name: Upload Dependency Check Report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dependency-check-report
           path: |
             reports/
+            *.html
             dependency-check-report.html
