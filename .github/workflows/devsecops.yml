@@ -135,10 +135,10 @@ jobs:
           echo "=== Trivy SCA: Scanning requirements.txt files ===" > reports/trivy-sca-results.txt
 
           for req in services/*/requirements.txt; do
-            service_name=$$(echo $$req | cut -d'/' -f2)
+            service_name=$(echo $req | cut -d'/' -f2)
             echo "" >> reports/trivy-sca-results.txt
-            echo "========== $$service_name ==========" >> reports/trivy-sca-results.txt
-            trivy fs --scanners vuln --severity HIGH,CRITICAL --format table "$$req" >> reports/trivy-sca-results.txt 2>&1 || true
+            echo "========== $service_name ==========" >> reports/trivy-sca-results.txt
+            trivy fs --scanners vuln --severity HIGH,CRITICAL --format table "$req" >> reports/trivy-sca-results.txt 2>&1 || true
           done
 
           echo "" >> reports/trivy-sca-results.txt
@@ -197,13 +197,11 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Start Vault Container
-        env:
-          VAULT_DEV_TOKEN: ${{ secrets.VAULT_DEV_TOKEN }}
         run: |
           docker run -d --name vault-dev \
             --cap-add=IPC_LOCK \
-            -e "VAULT_DEV_ROOT_TOKEN_ID=$VAULT_DEV_TOKEN" \
-            -e 'VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200' \
+            -e VAULT_DEV_ROOT_TOKEN_ID=vault-dev-token \
+            -e VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200 \
             -p 8200:8200 \
             hashicorp/vault:1.15
           sleep 10
@@ -224,11 +222,9 @@ jobs:
           } > reports/vault-results.txt
 
       - name: Store secrets
-        env:
-          VAULT_TOKEN: ${{ secrets.VAULT_DEV_TOKEN }}
         run: |
           curl -s \
-            --header "X-Vault-Token: $VAULT_TOKEN" \
+            --header "X-Vault-Token: vault-dev-token" \
             --request POST \
             --data '{"data":{"JWT_SECRET":"test-key","DB_PASSWORD":"test-pass"}}' \
             http://127.0.0.1:8200/v1/secret/data/secureshop/user-service
@@ -242,14 +238,12 @@ jobs:
           } >> reports/vault-results.txt
 
       - name: Retrieve secrets
-        env:
-          VAULT_TOKEN: ${{ secrets.VAULT_DEV_TOKEN }}
         run: |
           {
             echo ""
             echo "--- Secrets Retrieved ---"
             curl -s \
-              --header "X-Vault-Token: $VAULT_TOKEN" \
+              --header "X-Vault-Token: vault-dev-token" \
               http://127.0.0.1:8200/v1/secret/data/secureshop/user-service
           } >> reports/vault-results.txt
 
@@ -293,12 +287,12 @@ jobs:
             infrastructure-inventory-service \
             infrastructure-gateway; do
             echo "" >> reports/trivy-container-results.txt
-            echo "========== $$img ==========" >> reports/trivy-container-results.txt
+            echo "========== $img ==========" >> reports/trivy-container-results.txt
             trivy image \
               --severity HIGH,CRITICAL \
               --no-progress \
               --format table \
-              "$$img" >> reports/trivy-container-results.txt 2>&1 || echo "VULNERABILITIES FOUND in $$img"
+              "$img" >> reports/trivy-container-results.txt 2>&1 || echo "VULNERABILITIES FOUND in $img"
           done
 
           cat reports/trivy-container-results.txt
@@ -365,8 +359,8 @@ jobs:
         run: |
           docker compose -f infrastructure/docker-compose.yml up -d
           echo "Waiting for services to be ready..."
-          for i in $$(seq 1 10); do
-            echo "Attempt $$i/10..."
+          for i in $(seq 1 10); do
+            echo "Attempt $i/10..."
             if curl -s --fail http://localhost/products 2>/dev/null; then
               echo "Services are ready!"
               break
