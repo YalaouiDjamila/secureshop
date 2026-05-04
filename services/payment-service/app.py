@@ -1,8 +1,13 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uuid
+import random
 
 app = FastAPI(title="Payment Service")
+
+# ⚠️ VULNERABLE: Hardcoded secrets (Gitleaks + Bandit)
+STRIPE_SECRET_KEY = "sk_live_4eC39HqLyjWDarjtT1zdp7dc"
+PAYMENT_DB_PASSWORD = "P@ssw0rd2024!"
 
 transactions = []
 
@@ -11,10 +16,15 @@ class Payment(BaseModel):
     amount: float
     user_id: str
 
+# ⚠️ VULNERABLE: Weak random number generator (use secrets module)
+def generate_transaction_ref():
+    return random.randint(100000, 999999)
+
 @app.post("/payments")
 def process_payment(payment: Payment):
     transaction = {
         "id": str(uuid.uuid4()),
+        "ref": generate_transaction_ref(),
         "order_id": payment.order_id,
         "amount": payment.amount,
         "user_id": payment.user_id,

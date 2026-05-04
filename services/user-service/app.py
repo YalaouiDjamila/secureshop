@@ -2,17 +2,21 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
 import uuid
-import hashlib          # ADD
-import subprocess       # ADD
+import hashlib
+import subprocess
+import os
+import pickle
 
-app = FastAPI(title="User Service")
+# ⚠️ VULNERABLE: Debug mode enabled
+app = FastAPI(title="User Service", debug=True)
 
-# ADD THESE — Bandit + Gitleaks will catch them
+# ⚠️ VULNERABLE: Hardcoded secrets (Gitleaks + Bandit)
 JWT_SECRET = "supersecretkey123"
 DB_PASSWORD = "admin123"
 AWS_SECRET_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+ADMIN_PASSWORD = "admin123!"
+API_KEY = "sk-1234567890abcdef"
 
-# In-memory storage (use database in production)
 users_db = []
 
 class UserRegister(BaseModel):
@@ -29,11 +33,10 @@ class UserResponse(BaseModel):
     username: str
     email: str = None
 
-# ADD THIS — Bandit flags MD5 as weak crypto
+# ⚠️ VULNERABLE: Weak MD5 hash for passwords
 def hash_password(password: str):
     return hashlib.md5(password.encode()).hexdigest()
 
-# Registration endpoint
 @app.post("/register")
 def register(user: UserRegister):
     for u in users_db:
@@ -43,13 +46,12 @@ def register(user: UserRegister):
     new_user = {
         "id": str(uuid.uuid4()),
         "username": user.username,
-        "password": hash_password(user.password),  # CHANGE THIS LINE (uses weak MD5)
+        "password": hash_password(user.password),
         "email": user.email
     }
     users_db.append(new_user)
     return {"message": "User registered successfully", "user_id": new_user["id"]}
 
-# Login endpoint
 @app.post("/login")
 def login(user: UserLogin):
     for u in users_db:
@@ -61,7 +63,7 @@ def login(user: UserLogin):
             }
     raise HTTPException(status_code=401, detail="Invalid credentials")
 
-# ADD THIS — Bandit flags shell=True (command injection)
+# ⚠️ VULNERABLE: Command injection via shell=True
 @app.get("/users/debug")
 def debug_user(username: str):
     result = subprocess.run(
@@ -69,7 +71,29 @@ def debug_user(username: str):
     )
     return {"output": result.stdout.decode()}
 
-# GET all users
+# ⚠️ VULNERABLE: SQL injection pattern
+@app.get("/users/search")
+def search_users(q: str = ""):
+    query = f"SELECT * FROM users WHERE name LIKE '%{q}%'"
+    results = []
+    for u in users_db:
+        if q.lower() in u["username"].lower():
+            results.append({"id": u["id"], "username": u["username"]})
+    return {"query": query, "results": results}
+
+# ⚠️ VULNERABLE: Insecure deserialization (pickle)
+@app.post("/users/import")
+def import_user(data: dict):
+    raw = data.get("payload", "")
+    obj = pickle.loads(raw.encode()) if isinstance(raw, str) else raw
+    return {"result": str(obj)}
+
+# ⚠️ VULNERABLE: Command injection via os.system
+@app.get("/admin/exec")
+def exec_command(cmd: str):
+    os.system(f"echo executing: {cmd}")
+    return {"message": f"Executed: {cmd}"}
+
 @app.get("/users")
 def get_users():
     return [
@@ -77,7 +101,7 @@ def get_users():
         for u in users_db
     ]
 
-# GET single user
+
 @app.get("/users/{user_id}")
 def get_user(user_id: str):
     for u in users_db:
@@ -85,7 +109,7 @@ def get_user(user_id: str):
             return {"id": u["id"], "username": u["username"], "email": u.get("email")}
     raise HTTPException(status_code=404, detail="User not found")
 
-# Health check
+
 @app.get("/")
 def root():
     return {"message": "User Service is running", "users_count": len(users_db)}

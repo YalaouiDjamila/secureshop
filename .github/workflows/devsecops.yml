@@ -142,67 +142,48 @@ jobs:
           name: gitleaks-results
           path: reports/gitleaks-results.json
 
-  # ================= Container Scan =================
+    # ================= CONTAINER SCAN =================
   container-scan-trivy:
     name: Container Scan - Trivy
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-
+      
+      - name: Build Docker images
+        run: |
+          docker compose -f infrastructure/docker-compose.yml build
+          echo "=== Listing built images ==="
+          docker images | grep infrastructure || docker images
+      
       - name: Install Trivy
         run: |
-          sudo apt-get install -y wget apt-transport-https gnupg
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo "deb https://aquasecurity.github.io/trivy-repo/deb generic main" | sudo tee /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update -q
-          sudo apt-get install -y trivy
-
-      - name: Build Docker images
-        continue-on-error: true
-        run: |
-          for service in user-service product-service order-service payment-service notification-service inventory-service; do
-            echo "=== Building $service ==="
-            docker build -t "secureshop-${service}" "services/${service}/" || echo "WARN: Failed to build $service"
-          done
-
-      - name: Scan all built images
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+      
+      - name: Scan YOUR application images
         continue-on-error: true
         run: |
           mkdir -p reports
-          echo "[]" > reports/trivy-results.json
-          # List all secureshop images
-          IMAGES=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "^secureshop-" || true)
-          echo "Images found: $IMAGES"
-          if [ -z "$IMAGES" ]; then
-            echo "No secureshop images found — scanning base image instead"
-            trivy image --severity HIGH,CRITICAL --format json --no-progress python:3.11-slim \
-              > reports/trivy-results.json 2>&1 || true
-          else
-            # Scan each image and append results
-            RESULTS="["
-            FIRST=true
-            for img in $IMAGES; do
-              echo "Scanning $img ..."
-              RESULT=$(trivy image --severity HIGH,CRITICAL --format json --no-progress "$img" 2>/dev/null || echo "{}")
-              if [ "$FIRST" = true ]; then
-                RESULTS="${RESULTS}${RESULT}"
-                FIRST=false
-              else
-                RESULTS="${RESULTS},${RESULT}"
-              fi
-            done
-            RESULTS="${RESULTS}]"
-            echo "$RESULTS" > reports/trivy-results.json
+          # List all images and scan each one
+          for img in $(docker images --format "{{.Repository}}:{{.Tag}}" | grep "infrastructure"); do
+            echo "=== Scanning $img ==="
+            trivy image --severity HIGH,CRITICAL --format json --no-progress "$img" >> reports/trivy-results.json 2>&1 || true
+          done
+          # If no infrastructure images found, scan the base image as fallback
+          if [ ! -s reports/trivy-results.json ]; then
+            echo "No built images found, scanning base image..."
+            trivy image --severity HIGH,CRITICAL --format json --no-progress python:3.11-slim > reports/trivy-results.json 2>&1 || true
           fi
-
+          echo "=== Trivy scan complete ==="
+          cat reports/trivy-results.json | head -50
+      
       - name: Upload Trivy Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: trivy-results
           path: reports/trivy-results.json
-
+          
   # ================= IaC Scan =================
   iac-scan-checkov:
     name: IaC Scan - Checkov
@@ -276,4 +257,3 @@ jobs:
         with:
           name: zap-results
           path: report_html.html
-          
