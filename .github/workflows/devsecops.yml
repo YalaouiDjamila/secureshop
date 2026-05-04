@@ -40,7 +40,7 @@ jobs:
           name: sbom
           path: sbom.json
 
-  # ================= SAST =================
+  # ================= SAST - BANDIT =================
   sast-bandit:
     name: SAST - Bandit
     runs-on: ubuntu-latest
@@ -61,7 +61,7 @@ jobs:
             bandit -r ./services -f json -o reports/bandit-results.json || true
             bandit -r ./services -f sarif -o reports/bandit-results.sarif || true
           else
-            echo '{"results":[],"metrics":{},"errors":[],"generated_at":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > reports/bandit-results.json
+            echo '{"results":[],"metrics":{},"errors":[],"generated_at":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}'  > reports/bandit-results.json
             echo "No Python files found in ./services — skipping Bandit scan."
           fi
 
@@ -80,6 +80,84 @@ jobs:
         with:
           sarif_file: reports/bandit-results.sarif
           category: bandit-sast
+
+  # ================= SAST - SEMGREP =================
+  sast-semgrep:
+    name: SAST - Semgrep
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      - name: Run Semgrep (SARIF)
+        run: |
+          mkdir -p reports
+          semgrep scan \
+            --config=p/security-audit \
+            --config=p/python \
+            --sarif \
+            --output reports/semgrep-results.sarif \
+            ./services || true
+
+      - name: Run Semgrep (JSON)
+        run: |
+          semgrep scan \
+            --config=p/security-audit \
+            --config=p/python \
+            --json \
+            --output reports/semgrep-results.json \
+            ./services || true
+
+      - name: Ensure report files exist
+        if: always()
+        run: |
+          [ -f reports/semgrep-results.sarif ] || echo '{"version":"2.1.0","runs":[]}' > reports/semgrep-results.sarif
+          [ -f reports/semgrep-results.json ]  || echo '{"results":[],"errors":[]}' > reports/semgrep-results.json
+
+      - name: Upload Semgrep Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-results
+          path: |
+            reports/semgrep-results.sarif
+            reports/semgrep-results.json
+
+      - name: Upload Semgrep SARIF to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/semgrep-results.sarif
+          category: semgrep-sast
+
+  # ================= SAST - CODEQL =================
+  codeql:
+    name: SAST - CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['python']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
 
   # ================= SCA =================
   sca-dependency-check:
@@ -313,16 +391,20 @@ jobs:
           echo "=== Trivy Container Scan Results ===" > reports/trivy-container-results.txt
 
           for img in \
-           secureshop-user-service \
-           secureshop-product-service \
-           secureshop-order-service \
-           secureshop-payment-service \
-           secureshop-notification-service \
-           secureshop-inventory-service \
-           secureshop-gateway; do
-
-           echo "Scanning $img"
-           trivy image --severity HIGH,CRITICAL "$img" >> reports/trivy-container-results.txt || true
+            infrastructure-user-service \
+            infrastructure-product-service \
+            infrastructure-order-service \
+            infrastructure-payment-service \
+            infrastructure-notification-service \
+            infrastructure-inventory-service \
+            infrastructure-gateway; do
+            echo "" >> reports/trivy-container-results.txt
+            echo "========== $img ==========" >> reports/trivy-container-results.txt
+            trivy image \
+              --severity HIGH,CRITICAL \
+              --no-progress \
+              --format table \
+              "$img" >> reports/trivy-container-results.txt 2>&1 || echo "VULNERABILITIES FOUND in $img"
           done
 
           cat reports/trivy-container-results.txt
@@ -346,9 +428,8 @@ jobs:
               "$img" 2>/dev/null || true
           done
 
-          # Merge all SARIF files into one
           python3 - << 'PYEOF'
-import json, os, glob
+import json, glob
 
 runs = []
 for f in glob.glob("reports/trivy-sarif/*.sarif"):
@@ -435,58 +516,6 @@ PYEOF
           sarif_file: reports/checkov-results.sarif
           category: checkov-iac
 
-  # ================= SAST - SEMGREP =================
-  sast-semgrep:
-    name: SAST - Semgrep
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Semgrep
-        run: pip install semgrep
-
-      - name: Run Semgrep (SARIF)
-        run: |
-          mkdir -p reports
-          semgrep scan \
-            --config=p/security-audit \
-            --config=p/python \
-            --sarif \
-            --output reports/semgrep-results.sarif \
-            ./services || true
-
-      - name: Run Semgrep (JSON)
-        run: |
-          semgrep scan \
-            --config=p/security-audit \
-            --config=p/python \
-            --json \
-            --output reports/semgrep-results.json \
-            ./services || true
-
-      - name: Ensure report files exist
-        if: always()
-        run: |
-          [ -f reports/semgrep-results.sarif ] || echo '{"version":"2.1.0","runs":[]}' > reports/semgrep-results.sarif
-          [ -f reports/semgrep-results.json ]  || echo '{"results":[],"errors":[]}' > reports/semgrep-results.json
-
-      - name: Upload Semgrep Report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: semgrep-results
-          path: |
-            reports/semgrep-results.sarif
-            reports/semgrep-results.json
-
-      - name: Upload Semgrep SARIF to GitHub Security tab
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: reports/semgrep-results.sarif
-          category: semgrep-sast
-
   # ================= DAST =================
   dast-zap:
     name: DAST - OWASP ZAP
@@ -546,56 +575,30 @@ PYEOF
       - name: Stop services
         if: always()
         run: docker compose -f infrastructure/docker-compose.yml down
-  codeql:
-    name: SAST - CodeQL
+
+  # ================= LINTING =================
+  lint-hadolint:
+    name: Linting - Hadolint (All Dockerfiles)
     runs-on: ubuntu-latest
-    permissions:
-      security-events: write
-      actions: read
-      contents: read
-
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [ 'python' ]
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+      - name: Run Hadolint on all services
+        run: |
+          mkdir -p reports
+          echo "=== HADOLINT REPORT ===" > reports/hadolint-report.txt
+
+          for file in $(find . -type f -name "Dockerfile"); do
+            echo "" >> reports/hadolint-report.txt
+            echo "=========================" >> reports/hadolint-report.txt
+            echo "Scanning: $file" >> reports/hadolint-report.txt
+            echo "=========================" >> reports/hadolint-report.txt
+            docker run --rm -i hadolint/hadolint < "$file" >> reports/hadolint-report.txt || true
+          done
+
+      - name: Upload Hadolint Report
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          languages: ${{ matrix.language }}
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
-  lint-hadolint:
-   name: Linting - Hadolint (All Dockerfiles)
-   runs-on: ubuntu-latest
-
-   steps:
-     - uses: actions/checkout@v4
-
-     - name: Run Hadolint on all services
-       run: |
-         mkdir -p reports
-         echo "=== HADOLINT REPORT ===" > reports/hadolint-report.txt
-
-         for file in $(find . -type f -name "Dockerfile"); do
-           echo "" >> reports/hadolint-report.txt
-           echo "=========================" >> reports/hadolint-report.txt
-           echo "Scanning: $file" >> reports/hadolint-report.txt
-           echo "=========================" >> reports/hadolint-report.txt
-
-           docker run --rm -i hadolint/hadolint < "$file" >> reports/hadolint-report.txt || true
-         done
-
-     - name: Upload Hadolint Report
-       if: always()
-       uses: actions/upload-artifact@v4
-       with:
-         name: hadolint-report
-         path: reports/hadolint-report.txt
+          name: hadolint-report
+          path: reports/hadolint-report.txt
