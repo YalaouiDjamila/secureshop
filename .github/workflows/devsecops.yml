@@ -1,3 +1,4 @@
+```yaml
 name: DevSecOps Pipeline
 
 on:
@@ -18,10 +19,13 @@ env:
 
 jobs:
 
-  # ================= SBOM =================
+  # =========================================================
+  # SBOM
+  # =========================================================
   sbom:
     name: SBOM - Syft
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -40,10 +44,13 @@ jobs:
           name: sbom
           path: sbom.json
 
-  # ================= SAST =================
+  # =========================================================
+  # SAST - BANDIT
+  # =========================================================
   sast-bandit:
     name: SAST - Bandit
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -57,12 +64,13 @@ jobs:
       - name: Run Bandit
         run: |
           mkdir -p reports
+
           if [ -d "./services" ] && find ./services -name "*.py" | grep -q .; then
-            bandit -r ./services -f json -o reports/bandit-results.json || true
+            bandit -r ./services -f json  -o reports/bandit-results.json  || true
             bandit -r ./services -f sarif -o reports/bandit-results.sarif || true
           else
             echo '{"results":[],"metrics":{},"errors":[],"generated_at":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > reports/bandit-results.json
-            echo "No Python files found in ./services — skipping Bandit scan."
+            echo '{"version":"2.1.0","runs":[]}' > reports/bandit-results.sarif
           fi
 
       - name: Upload Bandit Report
@@ -81,10 +89,13 @@ jobs:
           sarif_file: reports/bandit-results.sarif
           category: bandit-sast
 
-  # ================= SCA =================
+  # =========================================================
+  # SCA - DEPENDENCY CHECK
+  # =========================================================
   sca-dependency-check:
     name: SCA - Dependency Check
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -92,13 +103,12 @@ jobs:
         run: |
           mkdir -p reports
           echo "# Combined requirements from all services" > combined-requirements.txt
+
           for req in services/*/requirements.txt; do
             echo "" >> combined-requirements.txt
             echo "# === $req ===" >> combined-requirements.txt
             cat "$req" >> combined-requirements.txt
           done
-          echo "Combined requirements:"
-          cat combined-requirements.txt
 
       - name: Run OWASP Dependency Check
         uses: dependency-check/Dependency-Check_Action@main
@@ -119,9 +129,13 @@ jobs:
           name: dependency-check-report
           path: reports/
 
+  # =========================================================
+  # SCA - PIP AUDIT
+  # =========================================================
   python-sca:
     name: SCA - pip-audit
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -143,10 +157,14 @@ jobs:
             --ignore-vuln CVE-2025-62727 \
             || true
 
+  # =========================================================
+  # SCA - TRIVY FS
+  # =========================================================
   sca-trivy:
     name: SCA - Trivy (Python Dependencies)
     runs-on: ubuntu-latest
     continue-on-error: true
+
     steps:
       - uses: actions/checkout@v4
 
@@ -156,23 +174,18 @@ jobs:
           trivy --version
 
       - name: Scan Python dependencies for CVEs
-        continue-on-error: true
         run: |
           mkdir -p reports
           echo "=== Trivy SCA: Scanning requirements.txt files ===" > reports/trivy-sca-results.txt
 
           for req in services/*/requirements.txt; do
-            service_name=$(echo $req | cut -d'/' -f2)
+            service_name=$(echo "$req" | cut -d'/' -f2)
             echo "" >> reports/trivy-sca-results.txt
             echo "========== $service_name ==========" >> reports/trivy-sca-results.txt
             trivy fs --scanners vuln --severity HIGH,CRITICAL --format table "$req" >> reports/trivy-sca-results.txt 2>&1 || true
           done
 
-          echo "" >> reports/trivy-sca-results.txt
-          echo "=== JSON Output ===" >> reports/trivy-sca-results.txt
-          trivy fs --scanners vuln --severity HIGH,CRITICAL,MEDIUM --format json -o reports/trivy-sca.json . 2>&1 || true
-
-          cat reports/trivy-sca-results.txt
+          trivy fs --scanners vuln --severity HIGH,CRITICAL,MEDIUM --format json -o reports/trivy-sca.json . || true
 
       - name: Upload Trivy SCA Report
         if: always()
@@ -183,11 +196,14 @@ jobs:
             reports/trivy-sca-results.txt
             reports/trivy-sca.json
 
-  # ================= SECRET SCANNING =================
+  # =========================================================
+  # SECRET SCANNING - GITLEAKS
+  # =========================================================
   secrets-gitleaks:
     name: Secret Scanning - Gitleaks
     runs-on: ubuntu-latest
     continue-on-error: true
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -196,6 +212,7 @@ jobs:
       - name: Run Gitleaks
         run: |
           mkdir -p reports
+
           docker run --rm \
             -v "$GITHUB_WORKSPACE:/repo" \
             zricethezav/gitleaks:latest \
@@ -207,6 +224,8 @@ jobs:
             --report-format sarif \
             --report-path /repo/reports/gitleaks-results.sarif \
             || true
+
+          [ -f reports/gitleaks-results.sarif ] || echo '{"version":"2.1.0","runs":[]}' > reports/gitleaks-results.sarif
 
       - name: Upload Gitleaks Report
         if: always()
@@ -222,11 +241,14 @@ jobs:
           sarif_file: reports/gitleaks-results.sarif
           category: gitleaks-secrets
 
-  # ================= SECRETS MANAGEMENT =================
+  # =========================================================
+  # SECRETS MANAGEMENT - VAULT
+  # =========================================================
   secrets-vault:
     name: Secrets Management - Vault
     runs-on: ubuntu-latest
     continue-on-error: true
+
     steps:
       - uses: actions/checkout@v4
 
@@ -263,14 +285,6 @@ jobs:
             --data '{"data":{"JWT_SECRET":"test-key","DB_PASSWORD":"test-pass"}}' \
             http://127.0.0.1:8200/v1/secret/data/secureshop/user-service
 
-          {
-            echo ""
-            echo "--- Secrets Stored ---"
-            echo "Path: secret/secureshop/user-service"
-            echo "Keys: JWT_SECRET, DB_PASSWORD"
-            echo "Status: Secrets encrypted and stored in Vault"
-          } >> reports/vault-results.txt
-
       - name: Retrieve secrets
         run: |
           {
@@ -292,7 +306,9 @@ jobs:
         if: always()
         run: docker stop vault-dev && docker rm vault-dev
 
-# ================= CONTAINER SCANNING =================
+  # =========================================================
+  # CONTAINER SCANNING - TRIVY
+  # =========================================================
   container-trivy:
     name: Container Scan - Trivy
     runs-on: ubuntu-latest
@@ -302,8 +318,7 @@ jobs:
 
       - name: Install Trivy
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b /usr/local/bin
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
           trivy --version
 
       - name: Build Docker images
@@ -311,7 +326,7 @@ jobs:
 
       - name: Scan Docker images (TXT report)
         run: |
-          mkdir -p reports
+          mkdir -p reports/sarif-parts
           echo "=== TRIVY CONTAINER SCAN REPORT ===" > reports/trivy-container-results.txt
 
           for img in \
@@ -328,25 +343,15 @@ jobs:
             echo "Scanning: $img" >> reports/trivy-container-results.txt
             echo "==============================" >> reports/trivy-container-results.txt
 
-            trivy image \
-              --severity HIGH,CRITICAL \
-              --no-progress \
-              --format table \
-              "$img" >> reports/trivy-container-results.txt || true
+            trivy image --severity HIGH,CRITICAL --no-progress --format table "$img" >> reports/trivy-container-results.txt 2>&1 || true
           done
 
-      - name: Prepare SARIF output directory
-        run: mkdir -p reports/sarif-parts
-
-      # ---------- per-image SARIF scan + upload ----------
-
-      - name: Scan secureshop-user-service
+      - name: Scan user-service
         run: |
-          trivy image \
-            --severity HIGH,CRITICAL --no-progress --format sarif \
-            --output reports/sarif-parts/user-service.sarif \
-            secureshop-user-service || \
-          echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/user-service.sarif
+          trivy image --severity HIGH,CRITICAL --no-progress --format sarif \
+            --output reports/sarif-parts/user-service.sarif secureshop-user-service \
+            || echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/user-service.sarif
+
       - name: Upload SARIF - user-service
         if: always()
         uses: github/codeql-action/upload-sarif@v4
@@ -354,13 +359,12 @@ jobs:
           sarif_file: reports/sarif-parts/user-service.sarif
           category: trivy-user-service
 
-      - name: Scan secureshop-product-service
+      - name: Scan product-service
         run: |
-          trivy image \
-            --severity HIGH,CRITICAL --no-progress --format sarif \
-            --output reports/sarif-parts/product-service.sarif \
-            secureshop-product-service || \
-          echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/product-service.sarif
+          trivy image --severity HIGH,CRITICAL --no-progress --format sarif \
+            --output reports/sarif-parts/product-service.sarif secureshop-product-service \
+            || echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/product-service.sarif
+
       - name: Upload SARIF - product-service
         if: always()
         uses: github/codeql-action/upload-sarif@v4
@@ -368,13 +372,12 @@ jobs:
           sarif_file: reports/sarif-parts/product-service.sarif
           category: trivy-product-service
 
-      - name: Scan secureshop-order-service
+      - name: Scan order-service
         run: |
-          trivy image \
-            --severity HIGH,CRITICAL --no-progress --format sarif \
-            --output reports/sarif-parts/order-service.sarif \
-            secureshop-order-service || \
-          echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/order-service.sarif
+          trivy image --severity HIGH,CRITICAL --no-progress --format sarif \
+            --output reports/sarif-parts/order-service.sarif secureshop-order-service \
+            || echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/order-service.sarif
+
       - name: Upload SARIF - order-service
         if: always()
         uses: github/codeql-action/upload-sarif@v4
@@ -382,13 +385,12 @@ jobs:
           sarif_file: reports/sarif-parts/order-service.sarif
           category: trivy-order-service
 
-      - name: Scan secureshop-payment-service
+      - name: Scan payment-service
         run: |
-          trivy image \
-            --severity HIGH,CRITICAL --no-progress --format sarif \
-            --output reports/sarif-parts/payment-service.sarif \
-            secureshop-payment-service || \
-          echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/payment-service.sarif
+          trivy image --severity HIGH,CRITICAL --no-progress --format sarif \
+            --output reports/sarif-parts/payment-service.sarif secureshop-payment-service \
+            || echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/payment-service.sarif
+
       - name: Upload SARIF - payment-service
         if: always()
         uses: github/codeql-action/upload-sarif@v4
@@ -396,13 +398,12 @@ jobs:
           sarif_file: reports/sarif-parts/payment-service.sarif
           category: trivy-payment-service
 
-      - name: Scan secureshop-notification-service
+      - name: Scan notification-service
         run: |
-          trivy image \
-            --severity HIGH,CRITICAL --no-progress --format sarif \
-            --output reports/sarif-parts/notification-service.sarif \
-            secureshop-notification-service || \
-          echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/notification-service.sarif
+          trivy image --severity HIGH,CRITICAL --no-progress --format sarif \
+            --output reports/sarif-parts/notification-service.sarif secureshop-notification-service \
+            || echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/notification-service.sarif
+
       - name: Upload SARIF - notification-service
         if: always()
         uses: github/codeql-action/upload-sarif@v4
@@ -410,13 +411,12 @@ jobs:
           sarif_file: reports/sarif-parts/notification-service.sarif
           category: trivy-notification-service
 
-      - name: Scan secureshop-inventory-service
+      - name: Scan inventory-service
         run: |
-          trivy image \
-            --severity HIGH,CRITICAL --no-progress --format sarif \
-            --output reports/sarif-parts/inventory-service.sarif \
-            secureshop-inventory-service || \
-          echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/inventory-service.sarif
+          trivy image --severity HIGH,CRITICAL --no-progress --format sarif \
+            --output reports/sarif-parts/inventory-service.sarif secureshop-inventory-service \
+            || echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/inventory-service.sarif
+
       - name: Upload SARIF - inventory-service
         if: always()
         uses: github/codeql-action/upload-sarif@v4
@@ -424,13 +424,12 @@ jobs:
           sarif_file: reports/sarif-parts/inventory-service.sarif
           category: trivy-inventory-service
 
-      - name: Scan secureshop-gateway
+      - name: Scan gateway
         run: |
-          trivy image \
-            --severity HIGH,CRITICAL --no-progress --format sarif \
-            --output reports/sarif-parts/gateway.sarif \
-            secureshop-gateway || \
-          echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/gateway.sarif
+          trivy image --severity HIGH,CRITICAL --no-progress --format sarif \
+            --output reports/sarif-parts/gateway.sarif secureshop-gateway \
+            || echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/gateway.sarif
+
       - name: Upload SARIF - gateway
         if: always()
         uses: github/codeql-action/upload-sarif@v4
@@ -438,9 +437,7 @@ jobs:
           sarif_file: reports/sarif-parts/gateway.sarif
           category: trivy-gateway
 
-      # ---------- upload all artifacts for offline review ----------
-
-      - name: Upload all Trivy reports as artifacts
+      - name: Upload all Trivy reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -448,11 +445,15 @@ jobs:
           path: |
             reports/trivy-container-results.txt
             reports/sarif-parts/
-  # ================= IaC =================
+
+  # =========================================================
+  # IAC - CHECKOV
+  # =========================================================
   iac-checkov:
     name: IaC Scan - Checkov
     runs-on: ubuntu-latest
     continue-on-error: true
+
     steps:
       - uses: actions/checkout@v4
 
@@ -460,16 +461,17 @@ jobs:
         run: pip install checkov
 
       - name: Scan Dockerfiles
-        continue-on-error: true
         run: |
           mkdir -p reports
           echo "=== Dockerfile Scan ===" > reports/checkov-results.txt
+
           checkov --directory . --framework dockerfile --output cli >> reports/checkov-results.txt 2>&1 || true
           checkov --directory . --framework dockerfile --output sarif --output-file-path reports/ 2>/dev/null || true
-          [ -f reports/results_sarif.sarif ] && mv reports/results_sarif.sarif reports/checkov-results.sarif || true
+
+          [ -f reports/results_sarif.sarif ] && mv reports/results_sarif.sarif reports/checkov-results.sarif
+          [ -f reports/checkov-results.sarif ] || echo '{"version":"2.1.0","runs":[]}' > reports/checkov-results.sarif
 
       - name: Scan docker-compose
-        continue-on-error: true
         run: |
           {
             echo ""
@@ -478,7 +480,6 @@ jobs:
           } >> reports/checkov-results.txt
 
       - name: Scan secrets in files
-        continue-on-error: true
         run: |
           {
             echo ""
@@ -502,20 +503,24 @@ jobs:
           sarif_file: reports/checkov-results.sarif
           category: checkov-iac
 
-  # ================= SAST - SEMGREP =================
+  # =========================================================
+  # SAST - SEMGREP
+  # =========================================================
   sast-semgrep:
     name: SAST - Semgrep
     runs-on: ubuntu-latest
     continue-on-error: true
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Semgrep
         run: pip install semgrep
 
-      - name: Run Semgrep (SARIF)
+      - name: Run Semgrep
         run: |
           mkdir -p reports
+
           semgrep scan \
             --config=p/security-audit \
             --config=p/python \
@@ -523,8 +528,6 @@ jobs:
             --output reports/semgrep-results.sarif \
             ./services || true
 
-      - name: Run Semgrep (JSON)
-        run: |
           semgrep scan \
             --config=p/security-audit \
             --config=p/python \
@@ -532,9 +535,6 @@ jobs:
             --output reports/semgrep-results.json \
             ./services || true
 
-      - name: Ensure report files exist
-        if: always()
-        run: |
           [ -f reports/semgrep-results.sarif ] || echo '{"version":"2.1.0","runs":[]}' > reports/semgrep-results.sarif
           [ -f reports/semgrep-results.json ]  || echo '{"results":[],"errors":[]}' > reports/semgrep-results.json
 
@@ -554,27 +554,27 @@ jobs:
           sarif_file: reports/semgrep-results.sarif
           category: semgrep-sast
 
-  # ================= DAST =================
+  # =========================================================
+  # DAST - ZAP
+  # =========================================================
   dast-zap:
     name: DAST - OWASP ZAP
     runs-on: ubuntu-latest
     needs: [container-trivy]
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Start services
         run: |
           docker compose -f infrastructure/docker-compose.yml up -d
-          echo "Waiting for services to be ready..."
+
           for i in $(seq 1 10); do
-            echo "Attempt $i/10..."
             if curl -s --fail http://localhost/products 2>/dev/null; then
-              echo "Services are ready!"
               break
             fi
             sleep 5
           done
-          docker compose -f infrastructure/docker-compose.yml ps
 
       - name: Fix ZAP workspace permissions
         run: |
@@ -592,10 +592,9 @@ jobs:
           report_md: report_md.md
           allow_issue_writing: true
 
-      - name: Move ZAP reports to reports dir
+      - name: Move ZAP reports
         if: always()
         run: |
-          mkdir -p reports
           [ -f report_html.html ] && mv report_html.html reports/zap-report.html || true
           [ -f report_json.json ] && mv report_json.json reports/zap-report.json || true
           [ -f report_md.md ]    && mv report_md.md    reports/zap-report.md   || true
@@ -613,9 +612,14 @@ jobs:
       - name: Stop services
         if: always()
         run: docker compose -f infrastructure/docker-compose.yml down
+
+  # =========================================================
+  # SAST - CODEQL
+  # =========================================================
   codeql:
     name: SAST - CodeQL
     runs-on: ubuntu-latest
+
     permissions:
       security-events: write
       actions: read
@@ -624,7 +628,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [ 'python' ]
+        language: ['python']
 
     steps:
       - uses: actions/checkout@v4
@@ -639,30 +643,35 @@ jobs:
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
+
+  # =========================================================
+  # LINT - HADOLINT
+  # =========================================================
   lint-hadolint:
-   name: Linting - Hadolint (All Dockerfiles)
-   runs-on: ubuntu-latest
+    name: Linting - Hadolint (All Dockerfiles)
+    runs-on: ubuntu-latest
 
-   steps:
-     - uses: actions/checkout@v4
+    steps:
+      - uses: actions/checkout@v4
 
-     - name: Run Hadolint on all services
-       run: |
-         mkdir -p reports
-         echo "=== HADOLINT REPORT ===" > reports/hadolint-report.txt
+      - name: Run Hadolint on all services
+        run: |
+          mkdir -p reports
+          echo "=== HADOLINT REPORT ===" > reports/hadolint-report.txt
 
-         for file in $(find . -type f -name "Dockerfile"); do
-           echo "" >> reports/hadolint-report.txt
-           echo "=========================" >> reports/hadolint-report.txt
-           echo "Scanning: $file" >> reports/hadolint-report.txt
-           echo "=========================" >> reports/hadolint-report.txt
+          for file in $(find . -type f -name "Dockerfile"); do
+            echo "" >> reports/hadolint-report.txt
+            echo "=========================" >> reports/hadolint-report.txt
+            echo "Scanning: $file" >> reports/hadolint-report.txt
+            echo "=========================" >> reports/hadolint-report.txt
 
-           docker run --rm -i hadolint/hadolint < "$file" >> reports/hadolint-report.txt || true
-         done
+            docker run --rm -i hadolint/hadolint < "$file" >> reports/hadolint-report.txt || true
+          done
 
-     - name: Upload Hadolint Report
-       if: always()
-       uses: actions/upload-artifact@v4
-       with:
-         name: hadolint-report
-         path: reports/hadolint-report.txt
+      - name: Upload Hadolint Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hadolint-report
+          path: reports/hadolint-report.txt
+```
