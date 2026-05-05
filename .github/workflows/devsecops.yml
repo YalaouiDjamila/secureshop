@@ -557,7 +557,9 @@ jobs:
   # DAST - ZAP
   # =========================================================
 # ================= DAST =================
-
+# =========================================================
+  # DAST - ZAP
+  # =========================================================
   dast-zap:
     name: DAST - OWASP ZAP
     runs-on: ubuntu-latest
@@ -568,13 +570,25 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Start services
-        run: docker compose -f infrastructure/docker-compose.yml up -d
+        run: |
+          docker compose -f infrastructure/docker-compose.yml up -d
+          echo "Waiting for services to be ready..."
+          sleep 30
 
-      - name: Run OWASP ZAP Scan
+      - name: Wait for gateway to respond
+        run: |
+          for i in $(seq 1 10); do
+            curl -s -o /dev/null -w "%{http_code}" http://localhost:8080 && break || true
+            echo "Attempt $i failed, retrying in 5s..."
+            sleep 5
+          done
+
+      - name: Run OWASP ZAP Baseline Scan
         run: |
           mkdir -p reports
+
           docker run --rm \
-            -v "$GITHUB_WORKSPACE/reports:/zap/wrk" \
+            -v "$GITHUB_WORKSPACE/reports:/zap/wrk:rw" \
             --network host \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
@@ -582,8 +596,81 @@ jobs:
             -J zap-report.json \
             -w zap-report.md \
             -r zap-report.html \
+            -x zap-report.xml \
+            -I \
             || true
 
+      - name: Generate SARIF from ZAP JSON
+        run: |
+          python3 << 'PYEOF'
+          import json, os
+
+          sarif = {
+            "version": "2.1.0",
+            "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+            "runs": [{
+              "tool": {
+                "driver": {
+                  "name": "OWASP ZAP",
+                  "version": "2.14.0",
+                  "informationUri": "https://www.zaproxy.org",
+                  "rules": []
+                }
+              },
+              "results": []
+            }]
+          }
+
+          zap_json_path = "reports/zap-report.json"
+          if os.path.exists(zap_json_path):
+            with open(zap_json_path) as f:
+              zap_data = json.load(f)
+
+            rules = {}
+            results = []
+
+            for site in zap_data.get("site", []):
+              for alert in site.get("alerts", []):
+                plugin_id = alert.get("pluginid", "unknown")
+                rule_id   = f"ZAP-{plugin_id}"
+                risk      = alert.get("riskdesc", "Info").split(" ")[0].upper()
+
+                level_map = {"HIGH": "error", "MEDIUM": "warning", "LOW": "note", "INFO": "note", "INFORMATIONAL": "note"}
+                level = level_map.get(risk, "note")
+
+                if rule_id not in rules:
+                  rules[rule_id] = {
+                    "id": rule_id,
+                    "name": alert.get("name", rule_id),
+                    "shortDescription": {"text": alert.get("name", rule_id)},
+                    "fullDescription":  {"text": alert.get("desc", "")[:1000]},
+                    "helpUri": alert.get("reference", "https://www.zaproxy.org"),
+                    "properties": {"security-severity": {"HIGH":"9.0","MEDIUM":"6.0","LOW":"3.0"}.get(risk, "1.0")}
+                  }
+
+                for instance in alert.get("instances", [{}]):
+                  uri = instance.get("uri", site.get("@name", "http://localhost"))
+                  results.append({
+                    "ruleId": rule_id,
+                    "level": level,
+                    "message": {"text": f"{alert.get('name','')}: {instance.get('evidence','N/A')}"},
+                    "locations": [{
+                      "physicalLocation": {
+                        "artifactLocation": {"uri": uri},
+                        "region": {"startLine": 1}
+                      }
+                    }]
+                  })
+
+            sarif["runs"][0]["tool"]["driver"]["rules"] = list(rules.values())
+            sarif["runs"][0]["results"] = results
+            print(f"Generated SARIF with {len(results)} results from ZAP report.")
+          else:
+            print("No ZAP JSON found, using empty SARIF fallback.")
+
+          with open("reports/zap-report.sarif", "w") as f:
+            json.dump(sarif, f, indent=2)
+          PYEOF
 
       - name: Upload ZAP Artifacts
         if: always()
@@ -593,51 +680,9 @@ jobs:
           path: |
             reports/zap-report.json
             reports/zap-report.md
-
-
-      - name: Ensure valid SARIF
-        run: |
-          VALID=false
-
-          if [ -f reports/zap-report.sarif ]; then
-            RUNS=$(python3 -c "
-          import json, sys
-          try:
-              d = json.load(open('reports/zap-report.sarif'))
-              runs = d.get('runs', [])
-              print(len(runs))
-          except:
-              print(0)
-          ")
-            [ "$RUNS" -gt 0 ] && VALID=true
-          fi
-
-          if [ "$VALID" = "false" ]; then
-            echo "No valid SARIF found, writing fallback..."
-            cat > reports/zap-report.sarif << 'EOF'
-          {
-            "version": "2.1.0",
-            "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-            "runs": [
-              {
-                "tool": {
-                  "driver": {
-                    "name": "OWASP ZAP",
-                    "version": "2.14.0",
-                    "informationUri": "https://www.zaproxy.org",
-                    "rules": []
-                  }
-                },
-                "results": []
-              }
-            ]
-          }
-          EOF
-          fi
-
-          echo "Final SARIF content:"
-          cat reports/zap-report.sarif
-
+            reports/zap-report.html
+            reports/zap-report.xml
+            reports/zap-report.sarif
 
       - name: Upload ZAP SARIF to GitHub Security tab
         if: always()
