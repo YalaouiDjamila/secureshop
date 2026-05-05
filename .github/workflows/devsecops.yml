@@ -1,4 +1,3 @@
-```yaml
 name: DevSecOps Pipeline
 
 on:
@@ -674,4 +673,3 @@ jobs:
         with:
           name: hadolint-report
           path: reports/hadolint-report.txt
-```
