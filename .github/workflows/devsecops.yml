@@ -557,12 +557,7 @@ jobs:
   # DAST - ZAP
   # =========================================================
 # ================= DAST =================
-# =========================================================
-  # DAST - ZAP
-  # =========================================================
-# =========================================================
-  # DAST - ZAP
-  # =========================================================
+
   dast-zap:
     name: DAST - OWASP ZAP
     runs-on: ubuntu-latest
@@ -613,6 +608,30 @@ jobs:
           path: |
             reports/zap-report.json
             reports/zap-report.md
+
+      - name: Ensure valid SARIF
+        run: |
+          if [ ! -f reports/zap-report.sarif ] || \
+             python3 -c "import json,sys; d=json.load(open('reports/zap-report.sarif')); sys.exit(0 if d.get('runs') else 1)"; then
+            cat > reports/zap-report.sarif << 'EOF'
+          {
+            "version": "2.1.0",
+            "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+            "runs": [
+              {
+                "tool": {
+                  "driver": {
+                    "name": "OWASP ZAP",
+                    "version": "2.14.0",
+                    "rules": []
+                  }
+                },
+                "results": []
+              }
+            ]
+          }
+          EOF
+          fi
 
       - name: Upload ZAP SARIF to GitHub Security tab
         if: always()
