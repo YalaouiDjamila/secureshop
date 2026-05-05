@@ -335,32 +335,46 @@ jobs:
 
           done
 
-     - name: Generate Trivy SARIF report (ALL IMAGES)
+     - name: Generate Trivy SARIF reports for all images
        run: |
-         mkdir -p reports
- 
-         trivy image \
-           --severity HIGH,CRITICAL \
-           --format sarif \
-           --output reports/trivy-container.sarif \
+          mkdir -p reports/sarif-parts
+
+          for img in \
            secureshop-user-service \
            secureshop-product-service \
            secureshop-order-service \
            secureshop-payment-service \
            secureshop-notification-service \
            secureshop-inventory-service \
-           secureshop-gateway \
-           
+           secureshop-gateway; do
 
+           safe_name=$(echo "$img" | tr '/' '-')
+           trivy image \
+             --severity HIGH,CRITICAL \
+             --no-progress \
+             --format sarif \
+             --output "reports/sarif-parts/${safe_name}.sarif" \
+             "$img" || true
+          done
+
+         # Merge all SARIF files into one using jq
+         # Each SARIF file has a "runs" array; we combine them all
+         jq -s '{
+           "version": "2.1.0",
+           "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+           "runs": [ .[] | .runs[] ]
+          }' reports/sarif-parts/*.sarif > reports/trivy-container.sarif || \
+            echo '{"version":"2.1.0","runs":[]}' > reports/trivy-container.sarif  
+
+    
      - name: Ensure SARIF exists (fix GitHub crash)
        run: |
          if [ ! -s reports/trivy-container.sarif ]; then
            echo '{"version":"2.1.0","runs":[]}' > reports/trivy-container.sarif
          fi
-
      - name: Upload Trivy Reports
        if: always()
-       uses: actions/upload-artifact@v4
+       uses: github/codeql-action/upload-sarif@v3 
        with:
          name: trivy-container-results
          path: |
