@@ -310,28 +310,30 @@ jobs:
  
      - name: Scan Docker images (TXT report)
        run: |
-         mkdir -p reports
-         echo "=== TRIVY CONTAINER SCAN REPORT ===" > reports/trivy-container-results.txt
- 
-         for img in \
-           secureshop-user-service \
-           secureshop-product-service \
-           secureshop-order-service \
-           secureshop-payment-service \
-           secureshop-notification-service \
-           secureshop-inventory-service \
-           secureshop-gateway; do
+          mkdir -p reports
+          echo "=== TRIVY CONTAINER SCAN REPORT ===" > reports/trivy-container-results.txt
 
-           echo "" >> reports/trivy-container-results.txt
-           echo "==============================" >> reports/trivy-container-results.txt
-           echo "Scanning: $img" >> reports/trivy-container-results.txt
-           echo "==============================" >> reports/trivy-container-results.txt
+          for img in \
+            secureshop-user-service \
+            secureshop-product-service \
+            secureshop-order-service \
+            secureshop-payment-service \
+            secureshop-notification-service \
+            secureshop-inventory-service \
+            secureshop-gateway; do
 
-           trivy image \
+            echo "" >> reports/trivy-container-results.txt
+            echo "==============================" >> reports/trivy-container-results.txt
+            echo "Scanning: $img" >> reports/trivy-container-results.txt
+            echo "==============================" >> reports/trivy-container-results.txt
+
+            trivy image \
              --severity HIGH,CRITICAL \
              --no-progress \
-             "$img" >> reports/trivy-container-results.txt 2>&1 || true
-         done
+             --format table \
+             "$img" >> reports/trivy-container-results.txt || true
+
+          done
 
      - name: Generate Trivy SARIF report (ALL IMAGES)
        run: |
@@ -348,7 +350,7 @@ jobs:
            secureshop-notification-service \
            secureshop-inventory-service \
            secureshop-gateway \
-           || true
+           
 
      - name: Ensure SARIF exists (fix GitHub crash)
        run: |
