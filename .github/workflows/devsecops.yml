@@ -76,7 +76,7 @@ jobs:
 
       - name: Upload Bandit SARIF to GitHub Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: reports/bandit-results.sarif
           category: bandit-sast
@@ -217,7 +217,7 @@ jobs:
 
       - name: Upload Gitleaks SARIF to GitHub Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: reports/gitleaks-results.sarif
           category: gitleaks-secrets
@@ -292,7 +292,7 @@ jobs:
         if: always()
         run: docker stop vault-dev && docker rm vault-dev
 
-  # ================= CONTAINER SCANNING =================
+# ================= CONTAINER SCANNING =================
   container-trivy:
     name: Container Scan - Trivy
     runs-on: ubuntu-latest
@@ -335,56 +335,119 @@ jobs:
               "$img" >> reports/trivy-container-results.txt || true
           done
 
-      - name: Generate Trivy SARIF reports for all images
+      - name: Prepare SARIF output directory
+        run: mkdir -p reports/sarif-parts
+
+      # ---------- per-image SARIF scan + upload ----------
+
+      - name: Scan secureshop-user-service
         run: |
-          mkdir -p reports/sarif-parts
+          trivy image \
+            --severity HIGH,CRITICAL --no-progress --format sarif \
+            --output reports/sarif-parts/user-service.sarif \
+            secureshop-user-service || \
+          echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/user-service.sarif
+      - name: Upload SARIF - user-service
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: reports/sarif-parts/user-service.sarif
+          category: trivy-user-service
 
-          for img in \
-            secureshop-user-service \
-            secureshop-product-service \
-            secureshop-order-service \
-            secureshop-payment-service \
-            secureshop-notification-service \
-            secureshop-inventory-service \
-            secureshop-gateway; do
-
-            safe_name=$(echo "$img" | tr '/' '-')
-            trivy image \
-              --severity HIGH,CRITICAL \
-              --no-progress \
-              --format sarif \
-              --output "reports/sarif-parts/${safe_name}.sarif" \
-              "$img" || true
-          done
-
-          jq -s '{
-            "version": "2.1.0",
-            "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
-            "runs": [ .[] | .runs[] ]
-          }' reports/sarif-parts/*.sarif > reports/trivy-container.sarif || \
-            echo '{"version":"2.1.0","runs":[]}' > reports/trivy-container.sarif
-
-      - name: Ensure SARIF exists (safety net)
+      - name: Scan secureshop-product-service
         run: |
-          if [ ! -s reports/trivy-container.sarif ]; then
-            echo '{"version":"2.1.0","runs":[]}' > reports/trivy-container.sarif
-          fi
+          trivy image \
+            --severity HIGH,CRITICAL --no-progress --format sarif \
+            --output reports/sarif-parts/product-service.sarif \
+            secureshop-product-service || \
+          echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/product-service.sarif
+      - name: Upload SARIF - product-service
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: reports/sarif-parts/product-service.sarif
+          category: trivy-product-service
 
-      - name: Upload Trivy Reports
+      - name: Scan secureshop-order-service
+        run: |
+          trivy image \
+            --severity HIGH,CRITICAL --no-progress --format sarif \
+            --output reports/sarif-parts/order-service.sarif \
+            secureshop-order-service || \
+          echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/order-service.sarif
+      - name: Upload SARIF - order-service
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: reports/sarif-parts/order-service.sarif
+          category: trivy-order-service
+
+      - name: Scan secureshop-payment-service
+        run: |
+          trivy image \
+            --severity HIGH,CRITICAL --no-progress --format sarif \
+            --output reports/sarif-parts/payment-service.sarif \
+            secureshop-payment-service || \
+          echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/payment-service.sarif
+      - name: Upload SARIF - payment-service
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: reports/sarif-parts/payment-service.sarif
+          category: trivy-payment-service
+
+      - name: Scan secureshop-notification-service
+        run: |
+          trivy image \
+            --severity HIGH,CRITICAL --no-progress --format sarif \
+            --output reports/sarif-parts/notification-service.sarif \
+            secureshop-notification-service || \
+          echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/notification-service.sarif
+      - name: Upload SARIF - notification-service
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: reports/sarif-parts/notification-service.sarif
+          category: trivy-notification-service
+
+      - name: Scan secureshop-inventory-service
+        run: |
+          trivy image \
+            --severity HIGH,CRITICAL --no-progress --format sarif \
+            --output reports/sarif-parts/inventory-service.sarif \
+            secureshop-inventory-service || \
+          echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/inventory-service.sarif
+      - name: Upload SARIF - inventory-service
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: reports/sarif-parts/inventory-service.sarif
+          category: trivy-inventory-service
+
+      - name: Scan secureshop-gateway
+        run: |
+          trivy image \
+            --severity HIGH,CRITICAL --no-progress --format sarif \
+            --output reports/sarif-parts/gateway.sarif \
+            secureshop-gateway || \
+          echo '{"version":"2.1.0","runs":[]}' > reports/sarif-parts/gateway.sarif
+      - name: Upload SARIF - gateway
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: reports/sarif-parts/gateway.sarif
+          category: trivy-gateway
+
+      # ---------- upload all artifacts for offline review ----------
+
+      - name: Upload all Trivy reports as artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: trivy-container-results
           path: |
             reports/trivy-container-results.txt
-            reports/trivy-container.sarif
-
-      - name: Upload SARIF to GitHub Security tab
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: reports/trivy-container.sarif
-          category: trivy-container
+            reports/sarif-parts/
   # ================= IaC =================
   iac-checkov:
     name: IaC Scan - Checkov
@@ -434,7 +497,7 @@ jobs:
 
       - name: Upload Checkov SARIF to GitHub Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: reports/checkov-results.sarif
           category: checkov-iac
@@ -486,7 +549,7 @@ jobs:
 
       - name: Upload Semgrep SARIF to GitHub Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: reports/semgrep-results.sarif
           category: semgrep-sast
@@ -567,15 +630,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@v4
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
   lint-hadolint:
    name: Linting - Hadolint (All Dockerfiles)
    runs-on: ubuntu-latest
