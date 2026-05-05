@@ -557,10 +557,13 @@ jobs:
   # DAST - ZAP
   # =========================================================
 # ================= DAST =================
+# =========================================================
+  # DAST - ZAP
+  # =========================================================
   dast-zap:
     name: DAST - OWASP ZAP
     runs-on: ubuntu-latest
-    needs: [sast-semgrep, sast-codeql]
+    needs: [sast-semgrep, codeql]
     steps:
       - name: Upload ZAP Artifacts
         if: always()
@@ -572,7 +575,7 @@ jobs:
             reports/zap-report.md
       - name: Upload ZAP SARIF to GitHub Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: reports/zap-report.json
           category: zap-dast
