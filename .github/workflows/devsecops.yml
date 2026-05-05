@@ -584,21 +584,6 @@ jobs:
             -r zap-report.html \
             || true
 
-      - name: Convert ZAP JSON to SARIF
-        run: |
-          [ -f reports/zap-report.json ] || echo '{"site":[]}' > reports/zap-report.json
-          cat > reports/zap-report.sarif << 'EOF'
-          {"version":"2.1.0","runs":[]}
-          EOF
-          # Génère un SARIF minimal si ZAP n'en produit pas nativement
-          docker run --rm \
-            -v "$GITHUB_WORKSPACE/reports:/zap/wrk" \
-            --network host \
-            ghcr.io/zaproxy/zaproxy:stable \
-            zap-baseline.py \
-            -t http://localhost:8080 \
-            -x zap-report.xml \
-            || true
 
       - name: Upload ZAP Artifacts
         if: always()
@@ -609,10 +594,26 @@ jobs:
             reports/zap-report.json
             reports/zap-report.md
 
+
       - name: Ensure valid SARIF
         run: |
-          if [ ! -f reports/zap-report.sarif ] || \
-             python3 -c "import json,sys; d=json.load(open('reports/zap-report.sarif')); sys.exit(0 if d.get('runs') else 1)"; then
+          VALID=false
+
+          if [ -f reports/zap-report.sarif ]; then
+            RUNS=$(python3 -c "
+          import json, sys
+          try:
+              d = json.load(open('reports/zap-report.sarif'))
+              runs = d.get('runs', [])
+              print(len(runs))
+          except:
+              print(0)
+          ")
+            [ "$RUNS" -gt 0 ] && VALID=true
+          fi
+
+          if [ "$VALID" = "false" ]; then
+            echo "No valid SARIF found, writing fallback..."
             cat > reports/zap-report.sarif << 'EOF'
           {
             "version": "2.1.0",
@@ -623,6 +624,7 @@ jobs:
                   "driver": {
                     "name": "OWASP ZAP",
                     "version": "2.14.0",
+                    "informationUri": "https://www.zaproxy.org",
                     "rules": []
                   }
                 },
@@ -632,6 +634,10 @@ jobs:
           }
           EOF
           fi
+
+          echo "Final SARIF content:"
+          cat reports/zap-report.sarif
+
 
       - name: Upload ZAP SARIF to GitHub Security tab
         if: always()
