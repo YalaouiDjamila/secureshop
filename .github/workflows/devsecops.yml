@@ -560,6 +560,7 @@ jobs:
 # =========================================================
   # DAST - ZAP
   # =========================================================
+
   dast-zap:
     name: DAST - OWASP ZAP
     runs-on: ubuntu-latest
@@ -578,15 +579,15 @@ jobs:
       - name: Wait for gateway to respond
         run: |
           for i in $(seq 1 10); do
-            curl -s -o /dev/null -w "%{http_code}" http://localhost:8080 && break || true
-            echo "Attempt $i failed, retrying in 5s..."
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080 || echo "000")
+            echo "Attempt $i - HTTP $STATUS"
+            [ "$STATUS" != "000" ] && break
             sleep 5
           done
 
       - name: Run OWASP ZAP Baseline Scan
         run: |
           mkdir -p reports
-
           docker run --rm \
             -v "$GITHUB_WORKSPACE/reports:/zap/wrk:rw" \
             --network host \
@@ -596,81 +597,8 @@ jobs:
             -J zap-report.json \
             -w zap-report.md \
             -r zap-report.html \
-            -x zap-report.xml \
             -I \
             || true
-
-      - name: Generate SARIF from ZAP JSON
-        run: |
-          python3 << 'PYEOF'
-          import json, os
-
-          sarif = {
-            "version": "2.1.0",
-            "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-            "runs": [{
-              "tool": {
-                "driver": {
-                  "name": "OWASP ZAP",
-                  "version": "2.14.0",
-                  "informationUri": "https://www.zaproxy.org",
-                  "rules": []
-                }
-              },
-              "results": []
-            }]
-          }
-
-          zap_json_path = "reports/zap-report.json"
-          if os.path.exists(zap_json_path):
-            with open(zap_json_path) as f:
-              zap_data = json.load(f)
-
-            rules = {}
-            results = []
-
-            for site in zap_data.get("site", []):
-              for alert in site.get("alerts", []):
-                plugin_id = alert.get("pluginid", "unknown")
-                rule_id   = f"ZAP-{plugin_id}"
-                risk      = alert.get("riskdesc", "Info").split(" ")[0].upper()
-
-                level_map = {"HIGH": "error", "MEDIUM": "warning", "LOW": "note", "INFO": "note", "INFORMATIONAL": "note"}
-                level = level_map.get(risk, "note")
-
-                if rule_id not in rules:
-                  rules[rule_id] = {
-                    "id": rule_id,
-                    "name": alert.get("name", rule_id),
-                    "shortDescription": {"text": alert.get("name", rule_id)},
-                    "fullDescription":  {"text": alert.get("desc", "")[:1000]},
-                    "helpUri": alert.get("reference", "https://www.zaproxy.org"),
-                    "properties": {"security-severity": {"HIGH":"9.0","MEDIUM":"6.0","LOW":"3.0"}.get(risk, "1.0")}
-                  }
-
-                for instance in alert.get("instances", [{}]):
-                  uri = instance.get("uri", site.get("@name", "http://localhost"))
-                  results.append({
-                    "ruleId": rule_id,
-                    "level": level,
-                    "message": {"text": f"{alert.get('name','')}: {instance.get('evidence','N/A')}"},
-                    "locations": [{
-                      "physicalLocation": {
-                        "artifactLocation": {"uri": uri},
-                        "region": {"startLine": 1}
-                      }
-                    }]
-                  })
-
-            sarif["runs"][0]["tool"]["driver"]["rules"] = list(rules.values())
-            sarif["runs"][0]["results"] = results
-            print(f"Generated SARIF with {len(results)} results from ZAP report.")
-          else:
-            print("No ZAP JSON found, using empty SARIF fallback.")
-
-          with open("reports/zap-report.sarif", "w") as f:
-            json.dump(sarif, f, indent=2)
-          PYEOF
 
       - name: Upload ZAP Artifacts
         if: always()
@@ -681,14 +609,12 @@ jobs:
             reports/zap-report.json
             reports/zap-report.md
             reports/zap-report.html
-            reports/zap-report.xml
-            reports/zap-report.sarif
 
       - name: Upload ZAP SARIF to GitHub Security tab
         if: always()
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: reports/zap-report.sarif
+          sarif_file: reports/zap-report.json
           category: zap-dast
 
       - name: Stop services
